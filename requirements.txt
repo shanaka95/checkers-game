@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+huggingface-hub
+pydantic
+python-multipart
+transformers>=4.46.0
+torch>=2.0.0

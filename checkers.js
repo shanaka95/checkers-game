@@ -81,6 +81,7 @@ class SimpleCheckers {
         });
         
         document.getElementById('new-game').addEventListener('click', () => this.newGame());
+        document.getElementById('get-llm-move').addEventListener('click', () => this.getLLMMove());
         document.getElementById('offer-draw').addEventListener('click', () => this.offerDraw());
         document.getElementById('resign').addEventListener('click', () => this.resign());
         document.getElementById('play-again').addEventListener('click', () => this.newGame());
@@ -164,7 +165,7 @@ class SimpleCheckers {
             if (this.isValidPos(jumpRow, jumpCol) && this.isValidPos(landRow, landCol)) {
                 const jumpPiece = this.board[jumpRow][jumpCol];
                 if (jumpPiece && jumpPiece.color !== piece.color && !this.board[landRow][landCol]) {
-                    moves.push({ 
+                moves.push({
                         row: landRow, 
                         col: landCol, 
                         isJump: true, 
@@ -190,14 +191,21 @@ class SimpleCheckers {
     
     makeMove(fromRow, fromCol, toRow, toCol) {
         const piece = this.board[fromRow][fromCol];
-        const move = this.validMoves.find(m => m.row === toRow && m.col === toCol);
+        let move = this.validMoves.find(m => m.row === toRow && m.col === toCol);
+        
+        // If move not found in validMoves, try to determine it manually
+        if (!move) {
+            // Get valid moves for this piece to find the move details
+            const pieceMoves = this.getValidMoves(fromRow, fromCol);
+            move = pieceMoves.find(m => m.row === toRow && m.col === toCol);
+        }
         
         // Move piece
         this.board[toRow][toCol] = piece;
         this.board[fromRow][fromCol] = null;
         
         // Handle capture
-        if (move.isJump) {
+        if (move && move.isJump) {
             this.board[move.jumpRow][move.jumpCol] = null;
             if (piece.color === 'red') {
                 this.whitePieces--;
@@ -215,7 +223,7 @@ class SimpleCheckers {
         }
         
         // Check for additional jumps
-        if (move.isJump) {
+        if (move && move.isJump) {
             const additionalJumps = this.getValidMoves(toRow, toCol).filter(m => m.isJump);
             if (additionalJumps.length > 0) {
                 this.selectedPiece = { row: toRow, col: toCol };
@@ -330,6 +338,329 @@ class SimpleCheckers {
         const winner = this.currentPlayer === 'red' ? 'White' : 'Red';
         if (confirm(`Are you sure you want to resign? ${winner} will win.`)) {
             this.endGame(`${winner} wins by resignation!`);
+        }
+    }
+    
+    /**
+     * Get the complete board state for LLM analysis
+     * Returns comprehensive game state including board position, current player, and all available moves
+     */
+    getBoardState() {
+        // Get all available moves for current player
+        const allMoves = [];
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (piece && piece.color === this.currentPlayer) {
+                    const moves = this.getValidMoves(row, col);
+                    moves.forEach(move => {
+                        allMoves.push({
+                            from: { row: row, col: col, notation: this.positionToNotation(row, col) },
+                            to: { row: move.row, col: move.col, notation: this.positionToNotation(move.row, move.col) },
+                            isJump: move.isJump,
+                            capturedPiece: move.isJump ? { 
+                                row: move.jumpRow, 
+                                col: move.jumpCol, 
+                                notation: this.positionToNotation(move.jumpRow, move.jumpCol)
+                            } : null,
+                            piece: {
+                                color: piece.color,
+                                isKing: piece.isKing
+                            }
+                        });
+                    });
+                }
+            }
+        }
+        
+        // Check if any moves are mandatory jumps
+        const jumpMoves = allMoves.filter(move => move.isJump);
+        const availableMoves = jumpMoves.length > 0 ? jumpMoves : allMoves;
+        
+        // Create board representation in multiple formats
+        const boardMatrix = this.board.map(row => 
+            row.map(cell => {
+                if (cell === null) return null;
+                return {
+                    color: cell.color,
+                    isKing: cell.isKing,
+                    symbol: cell.color === 'red' ? (cell.isKing ? 'R' : 'r') : (cell.isKing ? 'W' : 'w')
+                };
+            })
+        );
+        
+        // Create a simple string representation of the board
+        const boardString = this.board.map((row, rowIndex) => 
+            row.map((cell, colIndex) => {
+                // Only use dark squares (where pieces can be)
+                if ((rowIndex + colIndex) % 2 === 0) return ' '; // Light square
+                if (cell === null) return '.'; // Empty dark square
+                return cell.color === 'red' ? (cell.isKing ? 'R' : 'r') : (cell.isKing ? 'W' : 'w');
+            }).join('')
+        ).join('\n');
+        
+        // Count pieces by type
+        const pieceCount = {
+            red: { regular: 0, kings: 0, total: this.redPieces },
+            white: { regular: 0, kings: 0, total: this.whitePieces }
+        };
+        
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (piece) {
+                    if (piece.isKing) {
+                        pieceCount[piece.color].kings++;
+                    } else {
+                        pieceCount[piece.color].regular++;
+                    }
+                }
+            }
+        }
+        
+        // Get all opponent pieces and their positions (for threat analysis)
+        const opponentColor = this.currentPlayer === 'red' ? 'white' : 'red';
+        const opponentPieces = [];
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (piece && piece.color === opponentColor) {
+                    opponentPieces.push({
+                        position: { row: row, col: col, notation: this.positionToNotation(row, col) },
+                        color: piece.color,
+                        isKing: piece.isKing,
+                        possibleMoves: this.getValidMovesForPiece(row, col, opponentColor)
+                    });
+                }
+            }
+        }
+        
+        return {
+            // Game state
+            currentPlayer: this.currentPlayer,
+            gameOver: this.gameOver,
+            turnNumber: this.calculateTurnNumber(),
+            
+            // Board representation
+            board: boardMatrix,
+            boardString: boardString,
+            boardNotation: this.getBoardNotation(),
+            
+            // Piece information
+            pieceCount: pieceCount,
+            
+            // Available moves for current player
+            availableMoves: availableMoves,
+            mustJump: jumpMoves.length > 0,
+            moveCount: availableMoves.length,
+            
+            // Opponent information (for strategic analysis)
+            opponentPieces: opponentPieces,
+            
+            // Selected piece info (if any)
+            selectedPiece: this.selectedPiece ? {
+                position: this.selectedPiece,
+                notation: this.positionToNotation(this.selectedPiece.row, this.selectedPiece.col),
+                availableMoves: this.validMoves
+            } : null,
+            
+            // Game context
+            lastMove: this.lastMove || null,
+            gamePhase: this.determineGamePhase(),
+            
+            // Coordinate system explanation
+            coordinateSystem: {
+                explanation: "Board uses 0-7 indexing. Row 0 is top, Col 0 is left. Notation uses A-H (cols) and 1-8 (rows).",
+                example: "Position (0,1) = B8, Position (7,6) = G1"
+            }
+        };
+    }
+    
+    /**
+     * Convert board position to algebraic notation (like chess)
+     */
+    positionToNotation(row, col) {
+        const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+        return files[col] + (8 - row);
+    }
+    
+    /**
+     * Convert algebraic notation back to board coordinates
+     */
+    notationToPosition(notation) {
+        const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+        const col = files.indexOf(notation[0].toUpperCase());
+        const row = 8 - parseInt(notation[1]);
+        return { row, col };
+    }
+    
+    /**
+     * Get valid moves for a piece regardless of current player (for opponent analysis)
+     */
+    getValidMovesForPiece(row, col, forColor) {
+        const piece = this.board[row][col];
+        if (!piece || piece.color !== forColor) return [];
+        
+        const moves = [];
+        const directions = piece.isKing ? 
+            [[-1, -1], [-1, 1], [1, -1], [1, 1]] :
+            piece.color === 'red' ? [[1, -1], [1, 1]] : [[-1, -1], [-1, 1]];
+        
+        // Check regular moves
+        directions.forEach(([dr, dc]) => {
+            const newRow = row + dr;
+            const newCol = col + dc;
+            
+            if (this.isValidPos(newRow, newCol) && !this.board[newRow][newCol]) {
+                moves.push({ 
+                    row: newRow, 
+                    col: newCol, 
+                    notation: this.positionToNotation(newRow, newCol),
+                    isJump: false 
+                });
+            }
+        });
+        
+        // Check jumps
+        directions.forEach(([dr, dc]) => {
+            const jumpRow = row + dr;
+            const jumpCol = col + dc;
+            const landRow = row + dr * 2;
+            const landCol = col + dc * 2;
+            
+            if (this.isValidPos(jumpRow, jumpCol) && this.isValidPos(landRow, landCol)) {
+                const jumpPiece = this.board[jumpRow][jumpCol];
+                if (jumpPiece && jumpPiece.color !== piece.color && !this.board[landRow][landCol]) {
+                    moves.push({
+                        row: landRow, 
+                        col: landCol, 
+                        notation: this.positionToNotation(landRow, landCol),
+                        isJump: true, 
+                        jumpRow, 
+                        jumpCol,
+                        jumpNotation: this.positionToNotation(jumpRow, jumpCol)
+                    });
+                }
+            }
+        });
+        
+        return moves;
+    }
+    
+    /**
+     * Get board in standard checkers notation
+     */
+    getBoardNotation() {
+        const notation = [];
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                if ((row + col) % 2 === 1) { // Only dark squares
+                    const piece = this.board[row][col];
+                    if (piece) {
+                        const square = this.positionToNotation(row, col);
+                        const symbol = piece.color === 'red' ? (piece.isKing ? 'R' : 'r') : (piece.isKing ? 'W' : 'w');
+                        notation.push(`${square}:${symbol}`);
+                    }
+                }
+            }
+        }
+        return notation;
+    }
+    
+    /**
+     * Calculate approximate turn number
+     */
+    calculateTurnNumber() {
+        const totalPiecesLost = (24 - this.redPieces - this.whitePieces);
+        // Rough estimate: assume average 1 piece lost every 4 turns
+        return Math.floor(totalPiecesLost * 2) + 1;
+    }
+    
+    /**
+     * Determine current game phase
+     */
+    determineGamePhase() {
+        const totalPieces = this.redPieces + this.whitePieces;
+        if (totalPieces >= 20) return 'opening';
+        if (totalPieces >= 8) return 'midgame';
+        return 'endgame';
+    }
+    
+    /**
+     * Send current board state to LLM for move suggestion using the new predict-move endpoint
+     */
+    async getLLMMove() {
+        const boardState = this.getBoardState();
+        
+        try {
+            this.showMessage('Analyzing position...', 'info');
+            
+            const response = await fetch('http://localhost:8000/predict-move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    board_state: boardState
+                })
+            });
+            
+            const result = await response.json();
+            console.log('LLM Analysis:', result);
+            
+            // Show the LLM's analysis and auto-execute the move
+            if (result.suggested_move && result.suggested_move.from && result.suggested_move.to) {
+                const fromPos = this.notationToPosition(result.suggested_move.from);
+                const toPos = this.notationToPosition(result.suggested_move.to);
+                
+                // Validate that the suggested move is in our available moves
+                const isValidMove = boardState.availableMoves.some(move => 
+                    move.from.notation === result.suggested_move.from && 
+                    move.to.notation === result.suggested_move.to
+                );
+                
+                if (isValidMove && fromPos.row >= 0 && fromPos.col >= 0 && toPos.row >= 0 && toPos.col >= 0) {
+                    this.showMessage(
+                        `LLM suggests: ${result.suggested_move.from} → ${result.suggested_move.to} - Executing move...`, 
+                        'info'
+                    );
+                    
+                    // Auto-execute the move
+                    setTimeout(() => {
+                        // First select the piece to set up validMoves
+                        this.selectPiece(fromPos.row, fromPos.col);
+                        
+                        // Then make the move
+                        this.makeMove(fromPos.row, fromPos.col, toPos.row, toPos.col);
+                        
+                        this.showMessage(
+                            `LLM move executed: ${result.suggested_move.from} → ${result.suggested_move.to}`, 
+                            'info'
+                        );
+                    }, 1000); // Small delay to show the message first
+                    
+                } else {
+                    this.showMessage(
+                        `LLM suggested invalid move: ${result.suggested_move.from} → ${result.suggested_move.to}`, 
+                        'error'
+                    );
+                }
+                
+                // Log the move tool call to console
+                console.log('Move tool was called:', result.tool_calls);
+                console.log('Tool results:', result.tool_results);
+            } else {
+                this.showMessage('LLM provided analysis but no specific move', 'warning');
+            }
+            
+            // Also log the full reasoning
+            console.log('LLM Reasoning:', result.reasoning);
+            
+            return result;
+        } catch (error) {
+            console.error('Error calling LLM:', error);
+            this.showMessage('Error getting LLM move suggestion', 'error');
+            return null;
         }
     }
 }
