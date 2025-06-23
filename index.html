@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern Checkers</title>
+    <title>Checkers</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
@@ -143,8 +143,8 @@
 </head>
 <body class="text-gray-100 flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 lg:p-8">
     <header class="mb-8 text-center">
-        <h1 class="text-4xl sm:text-5xl font-bold gradient-text">Modern Checkers</h1>
-        <p class="text-gray-400 mt-2 text-lg">Experience the classic game with a sleek, engaging interface.</p>
+        <h1 class="text-4xl sm:text-5xl font-bold gradient-text">Checkers</h1>
+        <p class="text-gray-400 mt-2 text-lg">Play Checkers with AI agents.</p>
     </header>
 
     <!-- Game Mode Selection -->
@@ -177,10 +177,6 @@
     <div id="game-area" class="w-full max-w-6xl flex flex-col lg:flex-row gap-6" style="display: none;">
         <!-- Game Board Section -->
         <div class="flex-grow bg-gray-800 p-6 rounded-xl shadow-2xl card-glow">
-            <!-- AI Thinking Progress Bar -->
-            <div id="ai-progress" class="status-bar-bg h-6 w-full rounded-full overflow-hidden mb-6 shadow-inner" style="display: none;">
-                <div class="progress-bar-inner h-full w-3/4 rounded-full"></div>
-            </div>
             
             <!-- Game Board -->
             <div id="checkerboard" class="grid grid-cols-8 gap-1 p-3 bg-gray-900 rounded-lg shadow-md mx-auto" style="width: fit-content;">
@@ -280,7 +276,7 @@
     </div>
     
     <footer class="mt-12 text-center text-gray-500 text-sm">
-        <p>© 2023 Modern Checkers. Designed with <span class="material-icons-outlined text-xs text-red-500 align-middle">favorite</span> for a better gaming experience.</p>
+        <p>© 2023 Checkers. Designed with <span class="material-icons-outlined text-xs text-red-500 align-middle">favorite</span> for a better gaming experience.</p>
     </footer>
     
     <script src="checkers.js"></script>

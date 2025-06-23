@@ -34,18 +34,19 @@ except Exception as e:
     tokenizer = None
 
 # Define available tool
-def make_move(from_position: str, to_position: str) -> str:
+def make_move(from_position: str, to_position: str, game_id: str = "unknown") -> str:
     """
     Make a move in the checkers game.
     
     Args:
         from_position: Starting position in notation (e.g., "C3")
         to_position: Destination position in notation (e.g., "D4")
+        game_id: Unique game session identifier
     
     Returns:
         Confirmation message
     """
-    print(f"MOVE TOOL CALLED: From {from_position} to {to_position}")
+    print(f"[Game {game_id}] MOVE TOOL CALLED: From {from_position} to {to_position}")
     return f"Move executed: {from_position} -> {to_position}"
 
 # Tool registry
@@ -78,13 +79,18 @@ TOOL_DEFINITIONS = [
     }
 ]
 
-def execute_tool_call(tool_name: str, arguments: Dict[str, Any]) -> Any:
+def execute_tool_call(tool_name: str, arguments: Dict[str, Any], game_id: str = "unknown") -> Any:
     """Execute a tool call with the given arguments"""
     if tool_name not in AVAILABLE_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}")
     
     tool_function = AVAILABLE_TOOLS[tool_name]
     try:
+        # Add game_id to arguments if it's the move tool
+        if tool_name == "move":
+            arguments = arguments.copy()
+            arguments["game_id"] = game_id
+        
         result = tool_function(**arguments)
         return result
     except Exception as e:
@@ -204,6 +210,7 @@ def parse_tool_calls_from_response_fallback(response_text: str) -> List[Dict[str
 # Pydantic models for move prediction
 class PredictMoveRequest(BaseModel):
     board_state: Dict[str, Any]
+    game_id: Optional[str] = None
     model: Optional[str] = model
 
 class PredictMoveResponse(BaseModel):
@@ -227,9 +234,15 @@ async def predict_next_move(request: PredictMoveRequest):
         if not os.environ.get("HF_TOKEN"):
             raise HTTPException(status_code=500, detail="HF_TOKEN environment variable is not set")
         
+        # Log game ID for tracking
+        game_id = request.game_id or "unknown"
+        print(f"[Game {game_id}] Processing move prediction request")
+        
         board_state = request.board_state
         current_player = board_state.get("currentPlayer", "unknown")
         available_moves = board_state.get("availableMoves", [])
+        
+        print(f"[Game {game_id}] Current player: {current_player}, Available moves: {len(available_moves)}")
         
         # Create a detailed system message for checkers analysis with proper tool calling
         system_message = """You are a highly skilled, competitive checkers-playing AI following official American Checkers (English Draughts) rules. Your sole objective is to play the game to win, making moves that maximize your chances of victory.
@@ -371,7 +384,7 @@ Remember: You MUST call the move(from_position="X", to_position="Y") tool with y
         # Execute any detected tool calls
         for tool_call in tool_calls:
             try:
-                result = execute_tool_call(tool_call["tool"], tool_call["arguments"])
+                result = execute_tool_call(tool_call["tool"], tool_call["arguments"], game_id)
                 tool_results.append({
                     "tool": tool_call["tool"],
                     "arguments": tool_call["arguments"],
@@ -384,6 +397,7 @@ Remember: You MUST call the move(from_position="X", to_position="Y") tool with y
                         "from": tool_call["arguments"]["from_position"],
                         "to": tool_call["arguments"]["to_position"]
                     }
+                    print(f"[Game {game_id}] Suggested move: {suggested_move['from']} → {suggested_move['to']}")
                     
             except Exception as e:
                 tool_results.append({

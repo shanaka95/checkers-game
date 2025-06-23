@@ -14,7 +14,18 @@ class SimpleCheckers {
         this.autorunActive = false;
         this.aiThinking = false;
         
+        // Unique game session ID
+        this.gameId = this.generateGameId();
+        
         this.init();
+    }
+    
+    /**
+     * Generate a unique game ID for tracking sessions
+     */
+    generateGameId() {
+        // Generate a UUID-like string
+        return 'game_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9) + '_' + Math.random().toString(36).substr(2, 9);
     }
     
     createBoard() {
@@ -490,16 +501,13 @@ class SimpleCheckers {
     
     updateAIStatus(message) {
         const statusEl = document.getElementById('ai-status');
-        const progressBar = document.getElementById('ai-progress');
         
         statusEl.textContent = message;
         
         if (message.includes('thinking') || message.includes('analyzing')) {
             statusEl.classList.add('ai-thinking');
-            progressBar.style.display = 'block';
         } else {
             statusEl.classList.remove('ai-thinking');
-            progressBar.style.display = 'none';
         }
     }
 
@@ -514,6 +522,10 @@ class SimpleCheckers {
         this.whitePieces = 12;
         this.aiThinking = false;
         this.autorunActive = false;
+        
+        // Generate new game ID for this session
+        this.gameId = this.generateGameId();
+        console.log('New game started with ID:', this.gameId);
         
         this.closeModal();
         this.renderBoard();
@@ -546,6 +558,10 @@ class SimpleCheckers {
         this.whitePieces = 12;
         this.aiThinking = false;
         this.autorunActive = false;
+        
+        // Generate new game ID for this session
+        this.gameId = this.generateGameId();
+        console.log('New game started with ID:', this.gameId);
         
         this.closeModal();
         this.renderBoard();
@@ -857,7 +873,8 @@ class SimpleCheckers {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    board_state: boardState
+                    board_state: boardState,
+                    game_id: this.gameId
                 })
             });
             
