@@ -20,19 +20,20 @@ class SimpleCheckers {
     createBoard() {
         const board = Array(8).fill(null).map(() => Array(8).fill(null));
         
-        // Place red pieces (top 3 rows)
+        // According to official rules: pieces are placed on dark squares only
+        // Red pieces (traditionally black in standard checkers) start on top 3 rows
         for (let row = 0; row < 3; row++) {
             for (let col = 0; col < 8; col++) {
-                if ((row + col) % 2 === 1) {
+                if ((row + col) % 2 === 1) { // Dark squares only
                     board[row][col] = { color: 'red', isKing: false };
                 }
             }
         }
         
-        // Place white pieces (bottom 3 rows)
+        // White pieces start on bottom 3 rows  
         for (let row = 5; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
-                if ((row + col) % 2 === 1) {
+                if ((row + col) % 2 === 1) { // Dark squares only
                     board[row][col] = { color: 'white', isKing: false };
                 }
             }
@@ -42,10 +43,10 @@ class SimpleCheckers {
     }
     
     init() {
-        this.renderBoard();
         this.setupEvents();
         // Set initial message for mode selection
         this.showMessage('Select a game mode to start');
+        // Don't render board initially - wait for mode selection
     }
     
     renderBoard() {
@@ -343,6 +344,26 @@ class SimpleCheckers {
         }
         return false;
     }
+
+    /**
+     * Check if any jumps are available for the current player
+     * According to official rules, if jumps are available, they MUST be taken
+     */
+    hasAvailableJumps() {
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (piece && piece.color === this.currentPlayer) {
+                    const moves = this.getValidMoves(row, col);
+                    const jumps = moves.filter(move => move.isJump);
+                    if (jumps.length > 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
     
     endGame(message) {
         this.gameOver = true;
@@ -600,6 +621,8 @@ class SimpleCheckers {
         }
         
         // Check if any moves are mandatory jumps
+        // According to official rules: if jumps are available, you MUST take them
+        // But if multiple jumps are available, you may choose which one
         const jumpMoves = allMoves.filter(move => move.isJump);
         const availableMoves = jumpMoves.length > 0 ? jumpMoves : allMoves;
         
