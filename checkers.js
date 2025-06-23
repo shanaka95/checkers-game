@@ -8,6 +8,12 @@ class SimpleCheckers {
         this.redPieces = 12;
         this.whitePieces = 12;
         
+        // Game mode settings
+        this.gameMode = 'select'; // 'select', 'human-vs-ai', 'ai-vs-ai', 'human-vs-human'
+        this.humanPlayer = 'red'; // Which color the human plays (in human-vs-ai mode)
+        this.autorunActive = false;
+        this.aiThinking = false;
+        
         this.init();
     }
     
@@ -37,8 +43,9 @@ class SimpleCheckers {
     
     init() {
         this.renderBoard();
-        this.updateStatus();
         this.setupEvents();
+        // Set initial message for mode selection
+        this.showMessage('Select a game mode to start');
     }
     
     renderBoard() {
@@ -48,15 +55,15 @@ class SimpleCheckers {
         for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
                 const square = document.createElement('div');
-                square.className = `square ${(row + col) % 2 === 0 ? 'light' : 'dark'}`;
+                square.className = `checker-cell ${(row + col) % 2 === 0 ? 'light-square' : 'dark-square'}`;
                 square.dataset.row = row;
                 square.dataset.col = col;
                 
                 const piece = this.board[row][col];
                 if (piece) {
                     const pieceEl = document.createElement('div');
-                    pieceEl.className = `piece ${piece.color}`;
-                    if (piece.isKing) pieceEl.classList.add('king');
+                    pieceEl.className = `checker-piece ${piece.color}-piece`;
+                    if (piece.isKing) pieceEl.classList.add('king-piece');
                     square.appendChild(pieceEl);
                 }
                 
@@ -69,9 +76,9 @@ class SimpleCheckers {
     
     setupEvents() {
         document.getElementById('checkerboard').addEventListener('click', (e) => {
-            if (this.gameOver) return;
+            if (this.gameOver || this.aiThinking) return;
             
-            const square = e.target.closest('.square');
+            const square = e.target.closest('.checker-cell');
             if (!square) return;
             
             const row = parseInt(square.dataset.row);
@@ -80,8 +87,15 @@ class SimpleCheckers {
             this.handleClick(row, col);
         });
         
+        // Mode selection events
+        document.getElementById('mode-human-vs-ai').addEventListener('click', () => this.setGameMode('human-vs-ai'));
+        document.getElementById('mode-ai-vs-ai').addEventListener('click', () => this.setGameMode('ai-vs-ai'));
+        document.getElementById('mode-human-vs-human').addEventListener('click', () => this.setGameMode('human-vs-human'));
+        
+        // Game control events
         document.getElementById('new-game').addEventListener('click', () => this.newGame());
         document.getElementById('get-llm-move').addEventListener('click', () => this.getLLMMove());
+        document.getElementById('toggle-autorun').addEventListener('click', () => this.toggleAutorun());
         document.getElementById('offer-draw').addEventListener('click', () => this.offerDraw());
         document.getElementById('resign').addEventListener('click', () => this.resign());
         document.getElementById('play-again').addEventListener('click', () => this.newGame());
@@ -89,6 +103,16 @@ class SimpleCheckers {
     }
     
     handleClick(row, col) {
+        // In human-vs-ai mode, only allow human player to click
+        if (this.gameMode === 'human-vs-ai' && this.currentPlayer !== this.humanPlayer) {
+            return;
+        }
+        
+        // In ai-vs-ai mode, don't allow manual clicks
+        if (this.gameMode === 'ai-vs-ai') {
+            return;
+        }
+        
         const piece = this.board[row][col];
         
         if (this.selectedPiece) {
@@ -96,6 +120,13 @@ class SimpleCheckers {
             if (this.isValidMove(row, col)) {
                 this.makeMove(this.selectedPiece.row, this.selectedPiece.col, row, col);
                 this.clearSelection();
+                
+                // In human-vs-ai mode, trigger AI response after human move
+                if (this.gameMode === 'human-vs-ai' && !this.gameOver) {
+                    setTimeout(async () => {
+                        await this.getLLMMove();
+                    }, 1000);
+                }
             } else {
                 this.clearSelection();
                 if (piece && piece.color === this.currentPlayer) {
@@ -119,13 +150,13 @@ class SimpleCheckers {
         this.validMoves = [];
         
         // Remove all highlights
-        document.querySelectorAll('.piece').forEach(p => p.classList.remove('selected'));
-        document.querySelectorAll('.square').forEach(s => s.classList.remove('valid-move'));
+        document.querySelectorAll('.checker-piece').forEach(p => p.classList.remove('selected'));
+        document.querySelectorAll('.checker-cell').forEach(s => s.classList.remove('valid-move'));
     }
     
     highlightPiece(row, col) {
         const square = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
-        const piece = square.querySelector('.piece');
+        const piece = square.querySelector('.checker-piece');
         if (piece) piece.classList.add('selected');
     }
     
@@ -250,11 +281,30 @@ class SimpleCheckers {
         const redPlayer = document.getElementById('red-player');
         const whitePlayer = document.getElementById('white-player');
         
-        redPlayer.classList.toggle('current', this.currentPlayer === 'red');
-        whitePlayer.classList.toggle('current', this.currentPlayer === 'white');
+        // Update visual indicators for current player
+        if (this.currentPlayer === 'red') {
+            redPlayer.className = 'flex justify-between items-center p-3 bg-red-600 rounded-lg transition-all duration-300 shadow-md';
+            whitePlayer.className = 'flex justify-between items-center p-3 bg-gray-700 rounded-lg transition-all duration-300';
+        } else {
+            redPlayer.className = 'flex justify-between items-center p-3 bg-gray-700 rounded-lg transition-all duration-300';
+            whitePlayer.className = 'flex justify-between items-center p-3 bg-green-600 rounded-lg transition-all duration-300 shadow-md';
+        }
         
         if (!this.gameOver) {
-            this.showMessage(`${this.currentPlayer} player's turn`);
+            let message = `${this.currentPlayer} player's turn`;
+            
+            // Add mode-specific information
+            if (this.gameMode === 'human-vs-ai') {
+                if (this.currentPlayer === this.humanPlayer) {
+                    message = `Your turn (${this.currentPlayer})`;
+                } else {
+                    message = `AI's turn (${this.currentPlayer})`;
+                }
+            } else if (this.gameMode === 'ai-vs-ai') {
+                message = `AI vs AI - ${this.currentPlayer} AI's turn`;
+            }
+            
+            this.showMessage(message);
         }
     }
     
@@ -296,8 +346,11 @@ class SimpleCheckers {
     
     endGame(message) {
         this.gameOver = true;
+        this.autorunActive = false;
+        this.aiThinking = false;
         this.clearSelection();
         this.showMessage('Game Over', 'error');
+        this.updateAIStatus('Game finished');
         this.showModal(message);
     }
     
@@ -310,7 +363,127 @@ class SimpleCheckers {
         document.getElementById('game-over-modal').style.display = 'none';
     }
     
-    newGame() {
+    setGameMode(mode) {
+        this.gameMode = mode;
+        this.autorunActive = false;
+        this.aiThinking = false;
+        
+        // For human-vs-ai mode, ask which color the human wants to play
+        if (mode === 'human-vs-ai') {
+            const choice = confirm('Do you want to play as Red (goes first)?\n\nClick OK for Red, Cancel for White');
+            this.humanPlayer = choice ? 'red' : 'white';
+        }
+        
+        // Hide mode selection and show game area
+        document.getElementById('mode-selection').style.display = 'none';
+        document.getElementById('game-area').style.display = 'flex';
+        document.getElementById('game-mode-info').style.display = 'block';
+        
+        // Update UI based on mode
+        this.updateModeUI();
+        
+        // Initialize the game board for the selected mode
+        this.initializeGameForMode();
+        
+        // Auto-start AI vs AI if selected
+        if (mode === 'ai-vs-ai') {
+            this.startAutorun();
+        } else if (mode === 'human-vs-ai' && this.humanPlayer === 'white') {
+            // If human is white and AI is red, let AI make first move
+            setTimeout(() => {
+                this.getLLMMove();
+            }, 1000);
+        }
+    }
+    
+    updateModeUI() {
+        const modeText = document.getElementById('current-mode-text');
+        const modeIcon = document.querySelector('#game-mode-info .material-icons-outlined');
+        const getLLMBtn = document.getElementById('get-llm-move');
+        const autorunBtn = document.getElementById('toggle-autorun');
+        
+        switch(this.gameMode) {
+            case 'human-vs-ai':
+                const humanColor = this.humanPlayer.charAt(0).toUpperCase() + this.humanPlayer.slice(1);
+                modeText.textContent = `Human vs AI (You: ${humanColor})`;
+                modeIcon.textContent = 'psychology';
+                modeIcon.className = 'material-icons-outlined text-blue-400 text-3xl';
+                getLLMBtn.style.display = 'flex';
+                autorunBtn.style.display = 'none';
+                break;
+            case 'ai-vs-ai':
+                modeText.textContent = 'AI vs AI (Autorun)';
+                modeIcon.textContent = 'smart_toy';
+                modeIcon.className = 'material-icons-outlined text-purple-400 text-3xl';
+                getLLMBtn.style.display = 'none';
+                autorunBtn.style.display = 'flex';
+                break;
+            case 'human-vs-human':
+                modeText.textContent = 'Human vs Human';
+                modeIcon.textContent = 'people';
+                modeIcon.className = 'material-icons-outlined text-green-400 text-3xl';
+                getLLMBtn.style.display = 'flex';
+                autorunBtn.style.display = 'none';
+                break;
+        }
+    }
+    
+    toggleAutorun() {
+        if (this.autorunActive) {
+            this.stopAutorun();
+        } else {
+            this.startAutorun();
+        }
+    }
+    
+    startAutorun() {
+        this.autorunActive = true;
+        const btn = document.getElementById('toggle-autorun');
+        btn.innerHTML = '<span class="material-icons-outlined mr-2">pause</span>Pause Autorun';
+        this.updateAIStatus('Autorun active - AI vs AI');
+        this.continueAutorun();
+    }
+    
+    stopAutorun() {
+        this.autorunActive = false;
+        this.aiThinking = false;
+        const btn = document.getElementById('toggle-autorun');
+        btn.innerHTML = '<span class="material-icons-outlined mr-2">play_arrow</span>Resume Autorun';
+        this.updateAIStatus('Autorun paused');
+    }
+    
+    async continueAutorun() {
+        if (!this.autorunActive || this.gameOver) {
+            return;
+        }
+        
+        // Small delay between moves for better visualization
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        if (this.autorunActive && !this.gameOver) {
+            await this.getLLMMove();
+            // Continue the loop
+            this.continueAutorun();
+        }
+    }
+    
+    updateAIStatus(message) {
+        const statusEl = document.getElementById('ai-status');
+        const progressBar = document.getElementById('ai-progress');
+        
+        statusEl.textContent = message;
+        
+        if (message.includes('thinking') || message.includes('analyzing')) {
+            statusEl.classList.add('ai-thinking');
+            progressBar.style.display = 'block';
+        } else {
+            statusEl.classList.remove('ai-thinking');
+            progressBar.style.display = 'none';
+        }
+    }
+
+    initializeGameForMode() {
+        // Initialize a fresh game without asking about mode selection
         this.board = this.createBoard();
         this.currentPlayer = 'red';
         this.selectedPiece = null;
@@ -318,10 +491,63 @@ class SimpleCheckers {
         this.gameOver = false;
         this.redPieces = 12;
         this.whitePieces = 12;
+        this.aiThinking = false;
+        this.autorunActive = false;
         
         this.closeModal();
         this.renderBoard();
         this.updateStatus();
+        this.updateAIStatus('');
+    }
+
+    newGame() {
+        // If already in a game mode, ask if user wants to return to mode selection
+        if (this.gameMode !== 'select') {
+            const returnToModeSelection = confirm('Do you want to return to mode selection?\n\nClick OK to choose a new mode, Cancel to restart current game.');
+            if (returnToModeSelection) {
+                this.gameMode = 'select';
+                this.autorunActive = false;
+                this.aiThinking = false;
+                document.getElementById('mode-selection').style.display = 'block';
+                document.getElementById('game-area').style.display = 'none';
+                document.getElementById('game-mode-info').style.display = 'none';
+                this.showMessage('Select a game mode to start');
+                return;
+            }
+        }
+        
+        this.board = this.createBoard();
+        this.currentPlayer = 'red';
+        this.selectedPiece = null;
+        this.validMoves = [];
+        this.gameOver = false;
+        this.redPieces = 12;
+        this.whitePieces = 12;
+        this.aiThinking = false;
+        this.autorunActive = false;
+        
+        this.closeModal();
+        this.renderBoard();
+        this.updateStatus();
+        
+        // Reset to mode selection if no mode is set
+        if (this.gameMode === 'select') {
+            document.getElementById('mode-selection').style.display = 'block';
+            document.getElementById('game-area').style.display = 'none';
+            document.getElementById('game-mode-info').style.display = 'none';
+            this.showMessage('Select a game mode to start');
+        } else {
+            this.updateAIStatus('');
+            // Restart autorun if it was an AI vs AI game
+            if (this.gameMode === 'ai-vs-ai') {
+                this.startAutorun();
+            } else if (this.gameMode === 'human-vs-ai' && this.humanPlayer === 'white') {
+                // If human is white and AI is red, let AI make first move
+                setTimeout(() => {
+                    this.getLLMMove();
+                }, 1000);
+            }
+        }
     }
     
     offerDraw() {
@@ -590,10 +816,17 @@ class SimpleCheckers {
      * Send current board state to LLM for move suggestion using the new predict-move endpoint
      */
     async getLLMMove() {
+        if (this.aiThinking || this.gameOver) {
+            return;
+        }
+        
+        this.aiThinking = true;
         const boardState = this.getBoardState();
         
         try {
-            this.showMessage('Analyzing position...', 'info');
+            const playerName = this.currentPlayer === 'red' ? 'Red AI' : 'White AI';
+            this.showMessage(`${playerName} is thinking...`, 'info');
+            this.updateAIStatus(`${playerName} analyzing position...`);
             
             const response = await fetch('http://localhost:8000/predict-move', {
                 method: 'POST',
@@ -620,10 +853,12 @@ class SimpleCheckers {
                 );
                 
                 if (isValidMove && fromPos.row >= 0 && fromPos.col >= 0 && toPos.row >= 0 && toPos.col >= 0) {
+                    const playerName = this.currentPlayer === 'red' ? 'Red AI' : 'White AI';
                     this.showMessage(
-                        `LLM suggests: ${result.suggested_move.from} → ${result.suggested_move.to} - Executing move...`, 
+                        `${playerName} suggests: ${result.suggested_move.from} → ${result.suggested_move.to} - Executing move...`, 
                         'info'
                     );
+                    this.updateAIStatus(`Executing move: ${result.suggested_move.from} → ${result.suggested_move.to}`);
                     
                     // Auto-execute the move
                     setTimeout(() => {
@@ -634,9 +869,12 @@ class SimpleCheckers {
                         this.makeMove(fromPos.row, fromPos.col, toPos.row, toPos.col);
                         
                         this.showMessage(
-                            `LLM move executed: ${result.suggested_move.from} → ${result.suggested_move.to}`, 
+                            `${playerName} move executed: ${result.suggested_move.from} → ${result.suggested_move.to}`, 
                             'info'
                         );
+                        
+                        this.aiThinking = false;
+                        this.updateAIStatus('');
                     }, 1000); // Small delay to show the message first
                     
                 } else {
@@ -644,6 +882,8 @@ class SimpleCheckers {
                         `LLM suggested invalid move: ${result.suggested_move.from} → ${result.suggested_move.to}`, 
                         'error'
                     );
+                    this.aiThinking = false;
+                    this.updateAIStatus('');
                 }
                 
                 // Log the move tool call to console
@@ -651,6 +891,8 @@ class SimpleCheckers {
                 console.log('Tool results:', result.tool_results);
             } else {
                 this.showMessage('LLM provided analysis but no specific move', 'warning');
+                this.aiThinking = false;
+                this.updateAIStatus('');
             }
             
             // Also log the full reasoning
@@ -660,6 +902,8 @@ class SimpleCheckers {
         } catch (error) {
             console.error('Error calling LLM:', error);
             this.showMessage('Error getting LLM move suggestion', 'error');
+            this.aiThinking = false;
+            this.updateAIStatus('');
             return null;
         }
     }

@@ -3,322 +3,285 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkers</title>
+    <title>Modern Checkers</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
-            font-family: Arial, sans-serif;
-            background: #2c3e50;
-            color: white;
-            padding: 20px;
-            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
         }
-
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
+        .gradient-text {
+            background: linear-gradient(to right, #60a5fa, #3b82f6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 20px;
-            color: #ecf0f1;
+        .btn-primary {
+            background-color: #3b82f6;
+            transition: all 0.3s ease;
         }
-
-        .game-container {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-            justify-content: center;
+        .btn-primary:hover {
+            background-color: #2563eb;
+            transform: translateY(-1px);
+            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.3);
         }
-
-        .board-section {
-            flex: 1;
-            min-width: 400px;
-            display: flex;
-            justify-content: center;
+        .btn-secondary {
+            background-color: #1f2937;
+            border: 1px solid #374151;
+            transition: all 0.3s ease;
         }
-
-        .checkerboard {
-            display: grid;
-            grid-template-columns: repeat(8, 1fr);
-            gap: 2px;
-            background: #34495e;
-            padding: 10px;
-            border-radius: 8px;
-            width: 400px;
-            height: 400px;
+        .btn-secondary:hover {
+            background-color: #374151;
+            border-color: #4b5563;
+            transform: translateY(-1px);
         }
-
-        .square {
-            width: 45px;
-            height: 45px;
+        .btn-danger {
+            background-color: #ef4444;
+            transition: all 0.3s ease;
+        }
+        .btn-danger:hover {
+            background-color: #dc2626;
+            transform: translateY(-1px);
+            box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3);
+        }
+        .btn-mode {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            transition: all 0.3s ease;
+        }
+        .btn-mode:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 35px rgba(59, 130, 246, 0.4);
+        }
+        .checker-cell {
+            width: 50px;
+            height: 50px;
             display: flex;
             align-items: center;
             justify-content: center;
+            border-radius: 6px;
             cursor: pointer;
-            border-radius: 4px;
+            transition: all 0.2s ease;
         }
-
-        .square.light {
-            background: #ecf0f1;
+        .checker-cell:hover {
+            transform: scale(1.02);
         }
-
-        .square.dark {
-            background: #34495e;
-        }
-
-        .square.valid-move {
-            background: #2ecc71 !important;
-            opacity: 0.7;
-        }
-
-        .piece {
-            width: 35px;
-            height: 35px;
+        .checker-piece {
+            width: 36px;
+            height: 36px;
             border-radius: 50%;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4), inset 0 2px 4px rgba(255,255,255,0.2);
             cursor: pointer;
-            border: 2px solid #2c3e50;
+            transition: all 0.3s ease;
             position: relative;
-            transition: all 0.2s;
         }
-
-        .piece.red {
-            background: #e74c3c;
-        }
-
-        .piece.white {
-            background: #ecf0f1;
-        }
-
-        .piece.selected {
+        .checker-piece:hover {
             transform: scale(1.1);
-            box-shadow: 0 0 10px #f39c12;
         }
-
-        .piece.king::after {
-            content: '♔';
+        .checker-piece.selected {
+            transform: scale(1.15);
+            box-shadow: 0 0 20px #f59e0b, 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+        .light-square {
+            background-color: #e2e8f0;
+        }
+        .dark-square {
+            background-color: #6b7280;
+        }
+        .valid-move {
+            background-color: #10b981 !important;
+            opacity: 0.8;
+            animation: pulse-green 1.5s infinite;
+        }
+        @keyframes pulse-green {
+            0%, 100% { opacity: 0.8; }
+            50% { opacity: 1; }
+        }
+        .red-piece {
+            background: radial-gradient(circle at 65% 15%, white 1px, #ef4444 3%, #b91c1c 60%, #7f1d1d 100%);
+        }
+        .white-piece {
+            background: radial-gradient(circle at 65% 15%, white 1px, #e5e7eb 3%, #9ca3af 60%, #6b7280 100%);
+        }
+        .king-piece::after {
+            content: "👑";
+            font-size: 16px;
             position: absolute;
+            color: #facc15;
+            text-shadow: 0 0 3px black;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            font-size: 18px;
-            color: #f39c12;
         }
-
-        .info-panel {
-            min-width: 250px;
-            background: #34495e;
-            padding: 20px;
-            border-radius: 8px;
-            height: fit-content;
+        .status-bar-bg {
+            background-color: #1f2937;
         }
-
-        .status {
-            margin-bottom: 20px;
+        .progress-bar-inner {
+            background: linear-gradient(to right, #60a5fa, #3b82f6);
+            animation: pulse-progress 2s infinite;
         }
-
-        .status h3 {
-            margin-bottom: 10px;
-            color: #3498db;
+        @keyframes pulse-progress {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
         }
-
-        .player-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            padding: 10px;
-            background: #2c3e50;
-            border-radius: 4px;
+        .card-glow {
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
         }
-
-        .player-info.current {
-            background: #27ae60;
+        .ai-thinking {
+            animation: thinking-pulse 1.5s infinite;
         }
-
-        .piece-count {
-            font-weight: bold;
-            font-size: 18px;
+        @keyframes thinking-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
         }
-
-        .controls {
-            margin-top: 20px;
-        }
-
-        .controls button {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 10px;
-            background: #3498db;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .controls button:hover {
-            background: #2980b9;
-        }
-
-        .controls button.danger {
-            background: #e74c3c;
-        }
-
-        .controls button.danger:hover {
-            background: #c0392b;
-        }
-
-        .message {
-            text-align: center;
-            padding: 10px;
-            margin-bottom: 20px;
-            background: #34495e;
-            border-radius: 4px;
-            border-left: 4px solid #3498db;
-        }
-
-        .message.warning {
-            border-left-color: #f39c12;
-            background: #8b5a0a20;
-        }
-
-        .message.error {
-            border-left-color: #e74c3c;
-            background: #e74c3c20;
-        }
-
-        /* Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.8);
-            z-index: 1000;
-        }
-
-        .modal-content {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: #34495e;
-            padding: 30px;
-            border-radius: 8px;
-            text-align: center;
-            min-width: 300px;
-        }
-
-        .modal button {
-            padding: 10px 20px;
-            margin: 10px;
-            background: #3498db;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .modal button:hover {
-            background: #2980b9;
-        }
-
-        /* Mobile responsiveness */
-        @media (max-width: 768px) {
-            .game-container {
-                flex-direction: column;
-            }
-            
-            .board-section {
-                min-width: auto;
-            }
-            
-            .checkerboard {
-                width: 100%;
-                max-width: 350px;
-                height: auto;
-                aspect-ratio: 1;
-            }
-            
-            .square {
-                width: 100%;
-                height: 100%;
-                aspect-ratio: 1;
-            }
-            
-            .piece {
-                width: 80%;
-                height: 80%;
-                aspect-ratio: 1;
-            }
+        .mode-selection-card {
+            background: linear-gradient(135deg, #1f2937, #111827);
+            border: 1px solid #374151;
         }
     </style>
 </head>
-<body>
-    <div class="container">
-        <h1>Simple Checkers Game</h1>
+<body class="text-gray-100 flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 lg:p-8">
+    <header class="mb-8 text-center">
+        <h1 class="text-4xl sm:text-5xl font-bold gradient-text">Modern Checkers</h1>
+        <p class="text-gray-400 mt-2 text-lg">Experience the classic game with a sleek, engaging interface.</p>
+    </header>
+
+    <!-- Game Mode Selection -->
+    <div id="mode-selection" class="w-full max-w-2xl mb-8">
+        <div class="mode-selection-card p-8 rounded-xl card-glow">
+            <h2 class="text-2xl font-semibold mb-6 text-center text-blue-400">Choose Game Mode</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <button id="mode-human-vs-ai" class="btn-mode text-white py-4 px-6 rounded-lg text-lg font-medium flex flex-col items-center justify-center shadow-lg min-h-[120px]">
+                    <span class="material-icons-outlined text-3xl mb-2">psychology</span>
+                    <span>Play with AI</span>
+                    <span class="text-sm opacity-80 mt-1">Human vs AI</span>
+                </button>
+                <button id="mode-ai-vs-ai" class="btn-mode text-white py-4 px-6 rounded-lg text-lg font-medium flex flex-col items-center justify-center shadow-lg min-h-[120px]">
+                    <span class="material-icons-outlined text-3xl mb-2">smart_toy</span>
+                    <span>AI vs AI</span>
+                    <span class="text-sm opacity-80 mt-1">Autorun</span>
+                </button>
+                <button id="mode-human-vs-human" class="btn-mode text-white py-4 px-6 rounded-lg text-lg font-medium flex flex-col items-center justify-center shadow-lg min-h-[120px]">
+                    <span class="material-icons-outlined text-3xl mb-2">people</span>
+                    <span>Human vs Human</span>
+                    <span class="text-sm opacity-80 mt-1">Local Play</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Game Area -->
+    <div id="message" class="text-center text-gray-300 mb-6 text-lg font-medium">Select a game mode to start</div>
+    
+    <div id="game-area" class="w-full max-w-6xl flex flex-col lg:flex-row gap-6" style="display: none;">
+        <!-- Game Board Section -->
+        <div class="flex-grow bg-gray-800 p-6 rounded-xl shadow-2xl card-glow">
+            <!-- AI Thinking Progress Bar -->
+            <div id="ai-progress" class="status-bar-bg h-6 w-full rounded-full overflow-hidden mb-6 shadow-inner" style="display: none;">
+                <div class="progress-bar-inner h-full w-3/4 rounded-full"></div>
+            </div>
+            
+            <!-- Game Board -->
+            <div id="checkerboard" class="grid grid-cols-8 gap-1 p-3 bg-gray-900 rounded-lg shadow-md mx-auto" style="width: fit-content;">
+                <!-- Board squares will be generated by JavaScript -->
+            </div>
+        </div>
         
-        <div id="message" class="message">Red player's turn</div>
-        
-        <div class="game-container">
-            <div class="board-section">
-                <div id="checkerboard" class="checkerboard">
-                    <!-- Board squares will be generated by JavaScript -->
+        <!-- Side Panel -->
+        <div class="w-full lg:w-96 flex-shrink-0 space-y-6">
+            <!-- Game Status -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-2xl card-glow">
+                <h2 class="text-2xl font-semibold mb-4 text-blue-400">Game Status</h2>
+                <div class="space-y-3">
+                    <div id="red-player" class="flex justify-between items-center p-3 bg-gray-700 rounded-lg transition-all duration-300">
+                        <span class="text-lg font-medium text-red-400">Red Player</span>
+                        <span id="red-count" class="text-xl font-bold text-red-400">12</span>
+                    </div>
+                    <div id="white-player" class="flex justify-between items-center p-3 bg-gray-700 rounded-lg transition-all duration-300">
+                        <span class="text-lg font-medium text-gray-300">White Player</span>
+                        <span id="white-count" class="text-xl font-bold text-gray-300">12</span>
+                    </div>
                 </div>
             </div>
             
-            <div class="info-panel">
-                <div class="status">
-                    <h3>Game Status</h3>
-                    <div id="red-player" class="player-info current">
-                        <span>Red Player</span>
-                        <span id="red-count" class="piece-count">12</span>
+            <!-- Game Controls -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-2xl card-glow space-y-3">
+                <button id="new-game" class="btn-primary w-full text-white py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center shadow-lg">
+                    <span class="material-icons-outlined mr-2">refresh</span>New Game
+                </button>
+                <button id="get-llm-move" class="btn-secondary w-full text-gray-300 py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center" style="display: none;">
+                    <span class="material-icons-outlined mr-2">psychology</span>Get LLM Move
+                </button>
+                <button id="toggle-autorun" class="btn-secondary w-full text-gray-300 py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center" style="display: none;">
+                    <span class="material-icons-outlined mr-2">pause</span>Pause Autorun
+                </button>
+                <button id="offer-draw" class="btn-secondary w-full text-gray-300 py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center">
+                    <span class="material-icons-outlined mr-2">handshake</span>Offer Draw
+                </button>
+                <button id="resign" class="btn-danger w-full text-white py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center shadow-lg">
+                    <span class="material-icons-outlined mr-2">flag</span>Resign
+                </button>
+            </div>
+            
+            <!-- Current Mode Info -->
+            <div id="game-mode-info" class="bg-gray-800 p-6 rounded-xl shadow-2xl card-glow" style="display: none;">
+                <h2 class="text-xl font-semibold mb-3 text-blue-400">Current Mode</h2>
+                <div class="flex items-center space-x-3 p-3 bg-gray-700 rounded-lg">
+                    <span class="material-icons-outlined text-blue-400 text-3xl">psychology</span>
+                    <div>
+                        <p id="current-mode-text" class="text-lg font-medium">Human vs Human</p>
+                        <p id="ai-status" class="text-sm text-gray-400"></p>
                     </div>
-                    <div id="white-player" class="player-info">
-                        <span>White Player</span>
-                        <span id="white-count" class="piece-count">12</span>
-                    </div>
                 </div>
-                
-                <div class="controls">
-                    <button id="new-game">New Game</button>
-                    <button id="get-llm-move">Get LLM Move</button>
-                    <button id="offer-draw">Offer Draw</button>
-                    <button id="resign" class="danger">Resign</button>
-                </div>
-                
-                <div class="status">
-                    <h3>How to Play</h3>
-                    <p style="font-size: 12px; line-height: 1.4;">
-                        • Click a piece to select it<br>
-                        • Click a highlighted square to move<br>
-                        • You must jump when possible<br>
-                        • Reach the end to become a King<br>
-                        • Capture all pieces to win
-                    </p>
-                </div>
+            </div>
+            
+            <!-- How to Play -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-2xl card-glow">
+                <h2 class="text-xl font-semibold mb-3 text-blue-400">How to Play</h2>
+                <ul class="space-y-2 text-gray-300">
+                    <li class="flex items-center">
+                        <span class="material-icons-outlined text-blue-400 mr-2 text-sm">touch_app</span>
+                        Click a piece to select it.
+                    </li>
+                    <li class="flex items-center">
+                        <span class="material-icons-outlined text-green-400 mr-2 text-sm">ads_click</span>
+                        Click a highlighted square to move.
+                    </li>
+                    <li class="flex items-center">
+                        <span class="material-icons-outlined text-yellow-400 mr-2 text-sm">priority_high</span>
+                        You must jump when possible.
+                    </li>
+                    <li class="flex items-center">
+                        <span class="material-icons-outlined text-yellow-400 mr-2 text-sm">emoji_events</span>
+                        Reach the end to become a King <span class="text-yellow-400">(👑)</span>.
+                    </li>
+                    <li class="flex items-center">
+                        <span class="material-icons-outlined text-red-400 mr-2 text-sm">military_tech</span>
+                        Capture all pieces to win.
+                    </li>
+                </ul>
             </div>
         </div>
     </div>
     
     <!-- Game Over Modal -->
-    <div id="game-over-modal" class="modal">
-        <div class="modal-content">
-            <h2>Game Over!</h2>
-            <p id="game-over-message"></p>
-            <button id="play-again">Play Again</button>
-            <button id="close-modal">Close</button>
+    <div id="game-over-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" style="display: none;">
+        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl max-w-md w-full mx-4 card-glow">
+            <h2 class="text-3xl font-bold text-center mb-4 gradient-text">Game Over!</h2>
+            <p id="game-over-message" class="text-gray-300 text-center mb-6 text-lg"></p>
+            <div class="flex space-x-4">
+                <button id="play-again" class="btn-primary flex-1 text-white py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center">
+                    <span class="material-icons-outlined mr-2">replay</span>Play Again
+                </button>
+                <button id="close-modal" class="btn-secondary flex-1 text-gray-300 py-3 px-4 rounded-lg text-lg font-medium">Close</button>
+            </div>
         </div>
     </div>
+    
+    <footer class="mt-12 text-center text-gray-500 text-sm">
+        <p>© 2023 Modern Checkers. Designed with <span class="material-icons-outlined text-xs text-red-500 align-middle">favorite</span> for a better gaming experience.</p>
+    </footer>
     
     <script src="checkers.js"></script>
 </body>

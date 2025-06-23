@@ -18,7 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = "Qwen/Qwen3-4B"
+model = "Qwen/Qwen3-32B"
 # Initialize the Hugging Face client
 client = InferenceClient(
     provider="auto",
