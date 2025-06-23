@@ -1,14 +1,16 @@
 # Intelligent Checkers AI
 
-An advanced checkers game with integrated AI powered by Large Language Models (LLM). Features a complete web-based checkers interface with an intelligent AI opponent that can analyze positions, predict moves, and play competitively using modern transformer models.
+An advanced checkers game with integrated AI powered by Claude Sonnet 4. Features a complete web-based checkers interface with an intelligent AI opponent that can analyze positions, predict moves, and play competitively using Anthropic's most advanced language model.
 
 ## 🎯 Features
 
-- **Complete Checkers Game**: Full-featured web interface with drag-and-drop functionality
-- **AI Integration**: LLM-powered move prediction and analysis
-- **Enhanced Tool Calling**: Advanced tool parsing using transformers library
+- **Complete Checkers Game**: Full-featured web interface with multiple game modes
+- **Claude Sonnet 4 Integration**: Premium AI-powered move prediction and analysis
+- **Move History Tracking**: Complete game history with notation for pattern analysis
+- **Advanced Tool Calling**: Native Anthropic tool use for precise move execution
 - **Real-time Analysis**: Live board state analysis and strategic recommendations
 - **Auto-execution**: AI moves are automatically executed in the game
+- **Multiple Game Modes**: Human vs AI, AI vs AI autorun, and Human vs Human
 - **Competitive AI**: Strategic, forward-thinking AI opponent
 
 ## 🚀 Quick Start
@@ -20,12 +22,12 @@ pip install -r requirements.txt
 
 ### 2. Set Up Environment
 ```bash
-export HF_TOKEN="your_huggingface_token_here"
+export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
 ```
 
 Or create a `.env` file:
 ```
-HF_TOKEN=your_huggingface_token_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```
 
 ### 3. Start the AI Backend
@@ -45,21 +47,23 @@ Open `index.html` in your web browser to start playing.
 
 ## 🧠 AI Architecture
 
-### Enhanced Tool Calling System
-The AI uses a sophisticated multi-level tool calling approach:
+### Claude Sonnet 4 Tool Calling System
+The AI uses Anthropic's native tool calling system for precise move execution:
 
 ```python
-# Level 1: Native API tool calls (structured)
-if completion.choices[0].message.tool_calls:
-    # Handle structured tool calls from API
+# Native Anthropic tool calling
+response = client.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=1024,
+    system=system_message,
+    tools=TOOL_DEFINITIONS,
+    messages=[{"role": "user", "content": analysis_prompt}]
+)
 
-# Level 2: Template-based parsing with transformers
-elif tokenizer.apply_chat_template():
-    # Use proper chat templates for parsing
-
-# Level 3: Enhanced regex fallback
-else:
-    # Multiple regex patterns for different formats
+# Parse tool calls from Claude's response
+for content_block in response.content:
+    if content_block.type == "tool_use":
+        # Execute the move tool
 ```
 
 ### AI Capabilities
@@ -84,7 +88,7 @@ else:
       "boardString": "...",
       "pieceCount": {...}
     },
-    "model": "Qwen/Qwen3-4B"
+    "model": "claude-sonnet-4-20250514"
   }
   ```
 
@@ -105,11 +109,11 @@ else:
 ## 🔧 Configuration
 
 ### Model Configuration
-The system uses Qwen3-4B by default but supports other models:
+The system uses Claude Sonnet 4 as the primary AI model:
 
 ```python
 # In main.py
-model: Optional[str] = "Qwen/Qwen3-4B"  # Default model
+model: Optional[str] = "claude-sonnet-4-20250514"  # Claude Sonnet 4
 ```
 
 ### AI Personality
@@ -134,9 +138,8 @@ The AI is configured with a competitive, strategic personality:
 
 ### Dependencies
 - **FastAPI**: Web framework and API server
-- **Transformers**: Advanced NLP and tool calling
-- **Hugging Face Hub**: Model access and inference
-- **PyTorch**: Machine learning backend
+- **Anthropic**: Official Anthropic client for Claude API
+- **Pydantic**: Data validation and settings management
 
 ## 🎨 Game Interface
 
@@ -155,6 +158,7 @@ The AI receives comprehensive board information:
 {
   "currentPlayer": "red",
   "gamePhase": "opening",
+  "fullMoveNumber": 3,
   "availableMoves": [
     {
       "from": {"notation": "B6", "row": 2, "col": 1},
@@ -166,16 +170,75 @@ The AI receives comprehensive board information:
   "pieceCount": {
     "red": {"regular": 12, "kings": 0},
     "white": {"regular": 12, "kings": 0}
-  }
+  },
+  "moveHistory": [
+    {
+      "moveNumber": 1,
+      "player": "red",
+      "notation": "1. C3-D4",
+      "from": "C3",
+      "to": "D4",
+      "isJump": false
+    },
+    {
+      "moveNumber": 2,
+      "player": "white", 
+      "notation": "1. ... F6-E5",
+      "from": "F6",
+      "to": "E5",
+      "isJump": false
+    }
+  ],
+  "totalMoves": 2
+}
+```
+
+## 📚 Move History & Pattern Analysis
+
+The system tracks complete game history for enhanced AI decision-making:
+
+### Move Notation Format
+- **Standard moves**: `C3-D4` (from-to notation)
+- **Captures**: `D4xF6` (x indicates jump/capture with captured piece position)
+- **Promotions**: `A7-B8=K` (=K indicates king promotion)
+- **Move numbering**: Grouped by full moves (Red + White = 1 full move)
+- **Game format**: `1. C3-D4 F6-E5 2. D4xF6 G7-E5` (chess-style notation)
+
+### AI Benefits from Move History
+- **Pattern Recognition**: Identifies recurring strategic themes
+- **Opening Preparation**: Learns from previous game openings
+- **Tactical Awareness**: Spots repeated tactical motifs
+- **Endgame Knowledge**: References similar endgame positions
+- **Opponent Modeling**: Adapts to player tendencies over time
+
+### History Data Structure
+```json
+{
+  "moveHistory": [
+    {
+      "moveNumber": 1,
+      "fullMoveNumber": 1,
+      "player": "red",
+      "notation": "C3-D4",
+      "from": "C3",
+      "to": "D4",
+      "isJump": false,
+      "capturedPiece": null,
+      "wasPromoted": false,
+      "timestamp": "2024-01-01T12:00:00.000Z",
+      "description": "Red: C3-D4"
+    }
+  ],
+  "totalMoves": 1
 }
 ```
 
 ## 🎯 AI Strategy
 
-The AI employs advanced checkers strategy:
-- **Opening**: Control center squares and develop pieces
-- **Midgame**: Seek tactical opportunities and king promotion
-- **Endgame**: Precise calculation and piece coordination
+The AI employs advanced checkers strategy enhanced by move history analysis:
+- **Opening**: Control center squares and develop pieces based on historical patterns
+- **Midgame**: Seek tactical opportunities and king promotion with pattern recognition
+- **Endgame**: Precise calculation and piece coordination using endgame databases
 
 ## 🔍 API Documentation
 
@@ -186,14 +249,17 @@ Interactive API documentation available at:
 ## 🏆 Model Performance
 
 Optimized for:
-- **Qwen3-4B**: Primary model with excellent tool calling
-- **Fast Response**: Typically 2-5 seconds per move
-- **Strategic Depth**: Multi-move ahead planning
+- **Claude Sonnet 4**: Anthropic's most advanced model with superior reasoning
+- **Fast Response**: Typically 1-3 seconds per move
+- **Strategic Depth**: Advanced multi-move ahead planning
 - **Rule Compliance**: 100% legal move generation
+- **Tool Calling**: Native Anthropic tool use for precise execution
 
 ## 🔧 Environment Variables
 
-- `HF_TOKEN` - Your Hugging Face API token (required)
+- `ANTHROPIC_API_KEY` - Your Anthropic API key (required)
+
+Get your API key from: https://console.anthropic.com/
 
 
 ## 🎮 Example Usage

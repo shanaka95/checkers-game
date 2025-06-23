@@ -4,8 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
-from huggingface_hub import InferenceClient
-from transformers import AutoTokenizer
+import anthropic
 
 app = FastAPI(title="Checkers AI API", description="FastAPI backend for checkers move prediction")
 
@@ -18,20 +17,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = "Qwen/Qwen3-32B"
-# Initialize the Hugging Face client
-client = InferenceClient(
-    provider="auto",
-    api_key=os.environ.get("HF_TOKEN"),
-)
+# Claude Sonnet 4 model
+model = "claude-3-sonnet-20240229"
 
-# Initialize tokenizer for proper tool calling support
-try:
-    tokenizer = AutoTokenizer.from_pretrained(model)
-    print("Tokenizer loaded successfully")
-except Exception as e:
-    print(f"Warning: Could not load tokenizer: {e}")
-    tokenizer = None
+# Initialize the Anthropic client
+client = anthropic.Anthropic(
+    api_key=os.environ.get("ANTHROPIC_S"),
+)
 
 # Define available tool
 def make_move(from_position: str, to_position: str, game_id: str = "unknown") -> str:
@@ -54,27 +46,24 @@ AVAILABLE_TOOLS = {
     "move": make_move
 }
 
-# Tool definition for the LLM
+# Tool definition for Claude (Anthropic format)
 TOOL_DEFINITIONS = [
     {
-        "type": "function",
-        "function": {
-            "name": "move",
-            "description": "Make a move in the checkers game. Call this tool when you want to execute a move.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "from_position": {
-                        "type": "string",
-                        "description": "Starting position in algebraic notation (e.g., 'C3', 'E5')"
-                    },
-                    "to_position": {
-                        "type": "string",
-                        "description": "Destination position in algebraic notation (e.g., 'D4', 'F6')"
-                    }
+        "name": "move",
+        "description": "Make a move in the checkers game. Call this tool when you want to execute a move.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_position": {
+                    "type": "string",
+                    "description": "Starting position in algebraic notation (e.g., 'C3', 'E5')"
                 },
-                "required": ["from_position", "to_position"]
-            }
+                "to_position": {
+                    "type": "string",
+                    "description": "Destination position in algebraic notation (e.g., 'D4', 'F6')"
+                }
+            },
+            "required": ["from_position", "to_position"]
         }
     }
 ]
@@ -96,114 +85,19 @@ def execute_tool_call(tool_name: str, arguments: Dict[str, Any], game_id: str = 
     except Exception as e:
         return f"Error executing tool: {str(e)}"
 
-def parse_tool_calls_with_template(messages: List[Dict], response_text: str) -> List[Dict[str, Any]]:
+def parse_tool_calls_from_response(response_content: List[Any]) -> List[Dict[str, Any]]:
     """
-    Parse tool calls using proper chat template and tokenizer.
-    This is more robust than regex parsing.
+    Parse tool calls from Claude's response content blocks.
     """
     tool_calls = []
     
-    if tokenizer is None:
-        # Fallback to regex if tokenizer not available
-        return parse_tool_calls_from_response_fallback(response_text)
-    
-    try:
-        # Format the conversation with tools for proper parsing
-        formatted_messages = messages.copy()
-        formatted_messages.append({
-            "role": "assistant", 
-            "content": response_text
-        })
-        
-        # Apply chat template with tools
-        if hasattr(tokenizer, 'apply_chat_template'):
-            try:
-                # Try to apply chat template with tools
-                formatted_text = tokenizer.apply_chat_template(
-                    formatted_messages,
-                    tools=TOOL_DEFINITIONS,
-                    tokenize=False,
-                    add_generation_prompt=False
-                )
-                
-                # Look for tool calls in the formatted output
-                tool_calls = extract_tool_calls_from_formatted_response(response_text)
-                
-            except Exception as e:
-                print(f"Chat template application failed: {e}")
-                # Fallback to regex
-                tool_calls = parse_tool_calls_from_response_fallback(response_text)
-        else:
-            # Fallback to regex
-            tool_calls = parse_tool_calls_from_response_fallback(response_text)
-            
-    except Exception as e:
-        print(f"Template parsing failed: {e}")
-        # Fallback to regex
-        tool_calls = parse_tool_calls_from_response_fallback(response_text)
-    
-    return tool_calls
-
-def extract_tool_calls_from_formatted_response(response_text: str) -> List[Dict[str, Any]]:
-    """
-    Extract tool calls from properly formatted response.
-    Handles both JSON-style and function call style outputs.
-    """
-    import re
-    tool_calls = []
-    
-    # Method 1: Look for JSON tool call format
-    try:
-        # Try to find JSON objects that look like tool calls
-        json_pattern = r'\{[^{}]*"name"\s*:\s*"move"[^{}]*\}'
-        json_matches = re.findall(json_pattern, response_text)
-        
-        for match in json_matches:
-            try:
-                tool_data = json.loads(match)
-                if tool_data.get("name") == "move" and "arguments" in tool_data:
-                    tool_calls.append({
-                        "tool": "move",
-                        "arguments": tool_data["arguments"]
-                    })
-            except json.JSONDecodeError:
-                continue
-                
-    except Exception as e:
-        print(f"JSON parsing failed: {e}")
-    
-    # Method 2: Look for function call format (fallback)
-    if not tool_calls:
-        tool_calls = parse_tool_calls_from_response_fallback(response_text)
-    
-    return tool_calls
-
-def parse_tool_calls_from_response_fallback(response_text: str) -> List[Dict[str, Any]]:
-    """
-    Fallback regex-based tool call parsing.
-    """
-    import re
-    tool_calls = []
-    
-    # Multiple patterns to catch different formats
-    patterns = [
-        r'move\(from_position="([^"]+)",\s*to_position="([^"]+)"\)',
-        r'"name":\s*"move"[^}]*"from_position":\s*"([^"]+)"[^}]*"to_position":\s*"([^"]+)"',
-        r'"name":\s*"move"[^}]*"to_position":\s*"([^"]+)"[^}]*"from_position":\s*"([^"]+)"'
-    ]
-    
-    for pattern in patterns:
-        matches = re.findall(pattern, response_text)
-        for match in matches:
-            if len(match) >= 2:
-                from_pos, to_pos = match[0], match[1]
-                tool_calls.append({
-                    "tool": "move",
-                    "arguments": {
-                        "from_position": from_pos,
-                        "to_position": to_pos
-                    }
-                })
+    for content_block in response_content:
+        if hasattr(content_block, 'type') and content_block.type == "tool_use":
+            tool_calls.append({
+                "tool": content_block.name,
+                "arguments": content_block.input,
+                "id": content_block.id
+            })
     
     return tool_calls
 
@@ -223,20 +117,20 @@ class PredictMoveResponse(BaseModel):
 @app.get("/")
 async def root():
     """Health check endpoint"""
-    return {"message": "Checkers AI API is running", "available_endpoints": ["/predict-move"]}
+    return {"message": "Checkers AI API is running with Claude Sonnet 4", "available_endpoints": ["/predict-move"]}
 
 @app.post("/predict-move", response_model=PredictMoveResponse)
 async def predict_next_move(request: PredictMoveRequest):
     """
-    Analyze checkers board state and predict the best move using LLM with move tool calling
+    Analyze checkers board state and predict the best move using Claude Sonnet 4 with tool calling
     """
     try:
-        if not os.environ.get("HF_TOKEN"):
-            raise HTTPException(status_code=500, detail="HF_TOKEN environment variable is not set")
+        if not os.environ.get("ANTHROPIC_S"):
+            raise HTTPException(status_code=500, detail="ANTHROPIC_S environment variable is not set")
         
         # Log game ID for tracking
         game_id = request.game_id or "unknown"
-        print(f"[Game {game_id}] Processing move prediction request")
+        print(f"[Game {game_id}] Processing move prediction request with Claude Sonnet 4")
         
         board_state = request.board_state
         current_player = board_state.get("currentPlayer", "unknown")
@@ -244,140 +138,213 @@ async def predict_next_move(request: PredictMoveRequest):
         
         print(f"[Game {game_id}] Current player: {current_player}, Available moves: {len(available_moves)}")
         
-        # Create a detailed system message for checkers analysis with proper tool calling
-        system_message = """You are a highly skilled, competitive checkers-playing AI following official American Checkers (English Draughts) rules. Your sole objective is to play the game to win, making moves that maximize your chances of victory.
+        # Create an optimized system message for competitive checkers play
+        system_message = """You are an expert AI playing competitive American Checkers. Your goal is to win by making optimal moves. Analyze the given position and select the best move based on the following information:
 
-You have access to the following tool:
-move: Execute your chosen move in the checkers game using algebraic notation.
-Format: move(from_position, to_position)
+Analysis Process:
+1. Evaluate the current board state, considering piece count, positions, and potential king promotions.
+2. Analyze the move history to identify patterns, tactical themes, and opponent tendencies.
+3. Assess immediate tactics, including mandatory jumps, threats, and piece safety.
+4. Consider positional factors such as center control, piece activity, and mobility.
+5. Develop a strategic plan, focusing on king promotion opportunities and long-term objectives.
+6. Anticipate opponent's likely responses to your potential moves.
 
-When you decide on your move, you MUST use the move tool with the precise from and to positions in correct algebraic notation.
+Decision-Making and Strategy:
+1. If jumps are available, you MUST take the best jump. Consider multiple jump sequences if possible.
+2. If no jumps are available, prioritize moves that:
+   a. Control the center squares
+   b. Develop pieces safely
+   c. Create opportunities for king promotion
+   d. Protect your pieces and create threats to opponent's pieces
+3. Plan 2-3 moves ahead when possible, considering both offensive and defensive strategies.
+4. Adapt your strategy based on the game phase:
+   - Opening (turns 1-10): Focus on center control and safe development
+   - Midgame (turns 11-30): Create tactical opportunities and advance for kings
+   - Endgame (30+ turns): Calculate precisely and force opponent into unfavorable positions
+5. Play aggressively but safely, maximizing winning chances while minimizing risks.
 
-OFFICIAL CHECKERS RULES (Strictly Followed):
+Move Execution:
+Select the best move from the available moves list. Consider how this move will impact the board state, your strategic position, and your opponent's options.
 
-BASIC MOVEMENT:
-- All play occurs on dark squares only (8x8 board)
-- Regular pieces move diagonally forward only, one square at a time
-- Kings move diagonally in any direction (forward or backward), one square at a time
-- Red pieces start on top 3 rows, White pieces start on bottom 3 rows
-- Red traditionally moves first (like black in standard checkers)
+Output your analysis, strategic reasoning, and chosen move in the following format:
 
-CAPTURES (JUMPS):
-- You MUST jump if a jump move is available (mandatory rule)
-- Capture by jumping diagonally over an adjacent opponent piece to an empty square behind it
-- Multiple jumps MUST be taken consecutively if available after landing
-- During multiple jumps, you may change direction but must continue jumping
-- Remove captured pieces from the board immediately
-- Both regular pieces and kings can be captured
+<analysis>
+Provide a detailed analysis of the current position, including material count, positional advantages/disadvantages, and key tactical considerations.
+</analysis>
 
-KING PROMOTION:
-- Pieces become kings when reaching the opponent's back row (far end)
-- Kings are marked with a crown symbol (👑)
-- Kings can move and capture in any diagonal direction
+<strategy>
+Explain your strategic plan for the next few moves, considering both offensive and defensive elements.
+</strategy>
 
-WIN CONDITIONS:
-- Capture all opponent pieces, OR
-- Block opponent so they have no legal moves available
-- Draw occurs when neither player can force a win (usually with 2 or fewer pieces each)
-- In tournament play: draw after 40 moves without capture, or same move repeated 3 times
+<move_selection>
+State your chosen move and provide a comprehensive justification for why this move is optimal given the current game state and your strategic goals.
+</move_selection>
 
-STRATEGIC PRIORITIES:
-1. Control the center 8 squares for mobility
-2. Trade pieces when you're ahead in count
-3. Use forced jumps to your advantage
-4. Be first to get a king for mobility advantage
-5. Build defensive formations when needed
-6. Plan multiple moves ahead
+<move_execution>
+Execute your chosen move using the exact notation format: from_position="X1", to_position="Y2"
+</move_execution>
 
-Your Objective:
-Win by capturing all opponent pieces or forcing them into a position with no legal moves. Think strategically, anticipate opponent responses, and make moves that improve your long-term position.
+Your final output should include all the reasoning data"""
 
-CRITICAL: You MUST call the move tool with your chosen move using exact algebraic notation from the available moves list!"""
-
-        # Create detailed prompt with board analysis
+        # Create optimized prompt with concise board analysis
         moves_list = []
+        jump_moves = []
+        regular_moves = []
+        
         for move in available_moves:
-            move_type = " (JUMP - MANDATORY)" if move.get("isJump") else ""
-            moves_list.append(f"  • {move['from']['notation']} → {move['to']['notation']}{move_type}")
+            move_notation = f"{move['from']['notation']}-{move['to']['notation']}"
+            if move.get("isJump"):
+                jump_moves.append(move_notation)
+            else:
+                regular_moves.append(move_notation)
         
-        moves_text = "\n".join(moves_list) if moves_list else "  • No moves available"
+        # Format moves compactly
+        if jump_moves:
+            moves_text = f"JUMPS (mandatory): {', '.join(jump_moves)}"
+        elif regular_moves:
+            moves_text = f"Available: {', '.join(regular_moves)}"
+        else:
+            moves_text = "No moves available"
         
-        analysis_prompt = f"""Analyze this checkers position for {current_player} player:
+        # Get strategic context based on game phase
+        phase = board_state.get('gamePhase', 'unknown')
+        turn = board_state.get('turnNumber', 0)
+        
+        if phase == 'opening' and turn <= 10:
+            strategy_hint = "Opening: Control center, develop pieces safely"
+        elif phase == 'midgame' or (10 < turn <= 30):
+            strategy_hint = "Midgame: Seek tactical opportunities, advance for kings"
+        else:
+            strategy_hint = "Endgame: Calculate precisely, coordinate pieces"
+        
+        # Compact piece analysis
+        red_total = board_state.get('pieceCount', {}).get('red', {}).get('total', 0)
+        white_total = board_state.get('pieceCount', {}).get('white', {}).get('total', 0)
+        red_kings = board_state.get('pieceCount', {}).get('red', {}).get('kings', 0)
+        white_kings = board_state.get('pieceCount', {}).get('white', {}).get('kings', 0)
+        
+        material_balance = "Even" if red_total == white_total else f"{'Red' if red_total > white_total else 'White'} +{abs(red_total - white_total)}"
+        
+        # Format move history for the prompt
+        move_history = board_state.get('moveHistory', [])
+        total_moves = board_state.get('totalMoves', 0)
+        
+        if move_history:
+            # Show last 12 moves to avoid overwhelming the prompt
+            recent_moves = move_history[-12:] if len(move_history) > 12 else move_history
+            
+            # Format moves with clear player indication and better grouping
+            formatted_moves = []
+            current_move_pair = ""
+            
+            for i, move in enumerate(recent_moves):
+                player_indicator = "Red" if move['player'] == 'red' else "White"
+                move_str = f"{move['from']}-{move['to']}"
+                
+                # Add capture notation
+                if move.get('isJump') and move.get('capturedPiece'):
+                    move_str = f"{move['from']}x{move['capturedPiece']}"
+                
+                # Add promotion notation
+                if move.get('wasPromoted'):
+                    move_str += "=K"
+                
+                # Group moves by full move number (Red + White = 1 full move)
+                if move['player'] == 'red':
+                    current_move_pair = f"{move['fullMoveNumber']}. {move_str}"
+                else:  # white
+                    if current_move_pair:
+                        current_move_pair += f" {move_str}"
+                        formatted_moves.append(current_move_pair)
+                        current_move_pair = ""
+                    else:
+                        # White move without preceding red move (shouldn't normally happen)
+                        formatted_moves.append(f"{move['fullMoveNumber']}... {move_str}")
+            
+            # Add any remaining unpaired red move
+            if current_move_pair:
+                formatted_moves.append(current_move_pair)
+            
+            # Create the history text
+            if len(move_history) > 12:
+                history_text = f"MOVE HISTORY (last 12 of {total_moves} moves):\n"
+            else:
+                history_text = f"MOVE HISTORY ({total_moves} moves):\n"
+            
+            # Format in lines of 3 move pairs for readability
+            move_lines = []
+            for i in range(0, len(formatted_moves), 3):
+                line_moves = formatted_moves[i:i+3]
+                move_lines.append(" ".join(line_moves))
+            
+            history_text += "\n".join(move_lines)
+            
+            # Add last move summary for context
+            last_move = recent_moves[-1]
+            last_player = "Red" if last_move['player'] == 'red' else "White"
+            last_move_desc = f"{last_move['from']}-{last_move['to']}"
+            if last_move.get('isJump'):
+                last_move_desc = f"{last_move['from']}x{last_move.get('capturedPiece', '?')}"
+            if last_move.get('wasPromoted'):
+                last_move_desc += " (promoted to King)"
+            
+            history_text += f"\nLAST MOVE: {last_player} played {last_move_desc}"
+            
+        else:
+            history_text = "GAME START: No moves played yet - opening position"
+        
+        analysis_prompt = f"""Position Analysis - {current_player.title()} to move (Turn {turn})
 
-CURRENT BOARD STATE:
-- Current Player: {current_player}
-- Game Phase: {board_state.get('gamePhase', 'unknown')}
-- Turn Number: {board_state.get('turnNumber', '?')}
-- Must Jump: {board_state.get('mustJump', False)}
+BOARD:
+{board_state.get('boardString', 'Board not available')}
 
-PIECE COUNT:
-- Red: {board_state.get('pieceCount', {}).get('red', {}).get('total', '?')} pieces ({board_state.get('pieceCount', {}).get('red', {}).get('kings', 0)} kings)
-- White: {board_state.get('pieceCount', {}).get('white', {}).get('total', '?')} pieces ({board_state.get('pieceCount', {}).get('white', {}).get('kings', 0)} kings)
+{history_text}
 
-BOARD LAYOUT:
-{board_state.get('boardString', 'Board representation not available')}
+POSITION: {material_balance} material | Red: {red_total}({red_kings}♔) White: {white_total}({white_kings}♔)
+MOVES: {moves_text}
+STRATEGY: {strategy_hint}
 
-Legend: r=red piece, R=red king, w=white piece, W=white king, .=empty dark square, space=light square
+Analyze this position and select your best move. Consider:
+• MOVE HISTORY ANALYSIS: What patterns emerge from the game so far? Are there tactical themes, repeated motifs, or strategic plans developing?
+• IMMEDIATE TACTICS: Mandatory jumps, threats, piece safety, and forcing moves
+• POSITIONAL FACTORS: Center control, piece activity, pawn structure, and mobility
+• STRATEGIC PLANNING: King promotion opportunities, piece coordination, and long-term objectives
+• OPPONENT TENDENCIES: Based on move history, what is your opponent's playing style and likely next moves?
 
-AVAILABLE MOVES FOR {current_player.upper()}:
-{moves_text}
+Execute your chosen move using the move tool with exact notation (e.g., "C3" to "D4")."""
 
-OPPONENT PIECES:
-""" + "\n".join([f"  • {piece['position']['notation']}: {piece['color']} {'king' if piece['isKing'] else 'piece'}" 
-                for piece in board_state.get('opponentPieces', [])]) + f"""
-
-Please:
-1. Analyze the current position thoroughly
-2. Consider all tactical and strategic factors
-3. Choose the best move from the available options
-4. Call the move tool with your chosen move using exact notation
-5. Explain your reasoning
-
-Remember: You MUST call the move(from_position="X", to_position="Y") tool with your final decision!"""
-
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": analysis_prompt}
-        ]
-
-        # Make the completion request with tool calling support
+        # Make the completion request using Anthropic's Messages API
         try:
-            completion = client.chat.completions.create(
+            
+            response = client.messages.create(
                 model=request.model,
-                messages=messages,
+                max_tokens=1024,
+                system=system_message,
                 tools=TOOL_DEFINITIONS,
-                tool_choice="auto"  # Let the model decide when to use tools
+                messages=[
+                    {
+                        "role": "user",
+                        "content": analysis_prompt
+                    }
+                ]
             )
+            print(response)
         except Exception as e:
-            print(f"Tool calling failed, falling back to regular completion: {e}")
-            # Fallback to regular completion without tools
-            completion = client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-            )
+            print(f"Claude API call failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get response from Claude: {str(e)}")
         
-        response_text = completion.choices[0].message.content
+        # Extract response content
+        response_content = response.content
         
-        # Check if the model returned structured tool calls
-        tool_calls = []
-        if hasattr(completion.choices[0].message, 'tool_calls') and completion.choices[0].message.tool_calls:
-            # Handle structured tool calls from the API
-            print("Found structured tool calls in response")
-            for tool_call in completion.choices[0].message.tool_calls:
-                if tool_call.function.name == "move":
-                    try:
-                        args = json.loads(tool_call.function.arguments)
-                        tool_calls.append({
-                            "tool": "move",
-                            "arguments": args
-                        })
-                    except json.JSONDecodeError as e:
-                        print(f"Failed to parse tool call arguments: {e}")
+        # Get text content from response
+        analysis_text = ""
+        for content_block in response_content:
+            if content_block.type == "text":
+                analysis_text += content_block.text
         
-        # If no structured tool calls found, parse from response text
-        if not tool_calls:
-            print("No structured tool calls found, parsing from text")
-            tool_calls = parse_tool_calls_with_template(messages, response_text)
+        # Parse tool calls from Claude's response
+        tool_calls = parse_tool_calls_from_response(response_content)
+        
         tool_results = []
         suggested_move = {}
         
@@ -388,7 +355,8 @@ Remember: You MUST call the move(from_position="X", to_position="Y") tool with y
                 tool_results.append({
                     "tool": tool_call["tool"],
                     "arguments": tool_call["arguments"],
-                    "result": result
+                    "result": result,
+                    "id": tool_call.get("id")
                 })
                 
                 # If it's a move tool call, extract the suggested move
@@ -403,24 +371,20 @@ Remember: You MUST call the move(from_position="X", to_position="Y") tool with y
                 tool_results.append({
                     "tool": tool_call["tool"],
                     "arguments": tool_call["arguments"],
-                    "error": str(e)
+                    "error": str(e),
+                    "id": tool_call.get("id")
                 })
         
-        # Extract reasoning from the response
-        reasoning = response_text
-        
         return PredictMoveResponse(
-            analysis=response_text,
+            analysis=analysis_text,
             suggested_move=suggested_move,
-            reasoning=reasoning,
+            reasoning=analysis_text,
             tool_calls=tool_calls,
             tool_results=tool_results
         )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error predicting move: {str(e)}")
-
-
 
 if __name__ == "__main__":
     import uvicorn

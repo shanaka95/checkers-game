@@ -14,6 +14,10 @@ class SimpleCheckers {
         this.autorunActive = false;
         this.aiThinking = false;
         
+        // Move history tracking
+        this.moveHistory = [];
+        this.fullMoveNumber = 1; // Increments after white moves (like chess)
+        
         // Unique game session ID
         this.gameId = this.generateGameId();
         
@@ -243,12 +247,45 @@ class SimpleCheckers {
             move = pieceMoves.find(m => m.row === toRow && m.col === toCol);
         }
         
+        // Record the move before making it
+        const moveRecord = {
+            fullMoveNumber: this.fullMoveNumber,
+            player: this.currentPlayer,
+            from: {
+                row: fromRow,
+                col: fromCol,
+                notation: this.positionToNotation(fromRow, fromCol)
+            },
+            to: {
+                row: toRow,
+                col: toCol,
+                notation: this.positionToNotation(toRow, toCol)
+            },
+            piece: {
+                color: piece.color,
+                isKing: piece.isKing,
+                wasPromoted: false
+            },
+            isJump: move ? move.isJump : false,
+            capturedPiece: null,
+            timestamp: new Date().toISOString()
+        };
+        
         // Move piece
         this.board[toRow][toCol] = piece;
         this.board[fromRow][fromCol] = null;
         
         // Handle capture
         if (move && move.isJump) {
+            const capturedPiece = this.board[move.jumpRow][move.jumpCol];
+            moveRecord.capturedPiece = {
+                row: move.jumpRow,
+                col: move.jumpCol,
+                notation: this.positionToNotation(move.jumpRow, move.jumpCol),
+                color: capturedPiece.color,
+                isKing: capturedPiece.isKing
+            };
+            
             this.board[move.jumpRow][move.jumpCol] = null;
             if (piece.color === 'red') {
                 this.whitePieces--;
@@ -261,9 +298,13 @@ class SimpleCheckers {
         if (!piece.isKing) {
             if ((piece.color === 'red' && toRow === 7) || (piece.color === 'white' && toRow === 0)) {
                 piece.isKing = true;
+                moveRecord.piece.wasPromoted = true;
                 this.showMessage(`${piece.color} piece promoted to King!`, 'warning');
             }
         }
+        
+        // Add move to history
+        this.moveHistory.push(moveRecord);
         
         // Check for additional jumps
         if (move && move.isJump) {
@@ -286,6 +327,12 @@ class SimpleCheckers {
     
     switchPlayer() {
         this.currentPlayer = this.currentPlayer === 'red' ? 'white' : 'red';
+        
+        // Increment full move number after white moves (like chess notation)
+        if (this.currentPlayer === 'red') {
+            this.fullMoveNumber++;
+        }
+        
         this.updateStatus();
     }
     
@@ -523,6 +570,10 @@ class SimpleCheckers {
         this.aiThinking = false;
         this.autorunActive = false;
         
+        // Reset move history
+        this.moveHistory = [];
+        this.fullMoveNumber = 1;
+        
         // Generate new game ID for this session
         this.gameId = this.generateGameId();
         console.log('New game started with ID:', this.gameId);
@@ -532,7 +583,7 @@ class SimpleCheckers {
         this.updateStatus();
         this.updateAIStatus('');
     }
-
+    
     newGame() {
         // If already in a game mode, ask if user wants to return to mode selection
         if (this.gameMode !== 'select') {
@@ -558,6 +609,10 @@ class SimpleCheckers {
         this.whitePieces = 12;
         this.aiThinking = false;
         this.autorunActive = false;
+        
+        // Reset move history
+        this.moveHistory = [];
+        this.fullMoveNumber = 1;
         
         // Generate new game ID for this session
         this.gameId = this.generateGameId();
@@ -598,7 +653,7 @@ class SimpleCheckers {
     resign() {
         if (this.gameOver) return;
         
-        const winner = this.currentPlayer === 'red' ? 'White' : 'Red';
+            const winner = this.currentPlayer === 'red' ? 'White' : 'Red';
         if (confirm(`Are you sure you want to resign? ${winner} will win.`)) {
             this.endGame(`${winner} wins by resignation!`);
         }
@@ -654,15 +709,22 @@ class SimpleCheckers {
             })
         );
         
-        // Create a simple string representation of the board
-        const boardString = this.board.map((row, rowIndex) => 
-            row.map((cell, colIndex) => {
+        // Create a board string with coordinate labels for better AI understanding
+        const files = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+        let boardString = '  ' + files.join(' ') + '\n'; // Column headers
+        
+        boardString += this.board.map((row, rowIndex) => {
+            const rank = 8 - rowIndex; // Row numbers (8 to 1)
+            const rowString = row.map((cell, colIndex) => {
                 // Only use dark squares (where pieces can be)
                 if ((rowIndex + colIndex) % 2 === 0) return ' '; // Light square
                 if (cell === null) return '.'; // Empty dark square
                 return cell.color === 'red' ? (cell.isKing ? 'R' : 'r') : (cell.isKing ? 'W' : 'w');
-            }).join('')
-        ).join('\n');
+            }).join(' ');
+            return rank + ' ' + rowString;
+        }).join('\n');
+        
+        console.log('Generated board string with notation:', boardString);
         
         // Count pieces by type
         const pieceCount = {
@@ -700,11 +762,46 @@ class SimpleCheckers {
             }
         }
         
+        // Format move history for AI analysis
+        const formattedMoveHistory = this.moveHistory.map((move, index) => {
+            // Create proper checkers notation
+            let moveNotation;
+            
+            if (move.isJump) {
+                // For captures: from x captured_piece
+                moveNotation = `${move.from.notation}x${move.capturedPiece.notation}`;
+            } else {
+                // For regular moves: from-to
+                moveNotation = `${move.from.notation}-${move.to.notation}`;
+            }
+            
+            // Add promotion notation
+            if (move.piece.wasPromoted) {
+                moveNotation += '=K';
+            }
+            
+            return {
+                moveNumber: index + 1,
+                fullMoveNumber: move.fullMoveNumber,
+                player: move.player,
+                notation: moveNotation,
+                from: move.from.notation,
+                to: move.to.notation,
+                isJump: move.isJump,
+                capturedPiece: move.capturedPiece ? move.capturedPiece.notation : null,
+                wasPromoted: move.piece.wasPromoted,
+                timestamp: move.timestamp,
+                // Add descriptive text for UI display
+                description: `${move.player === 'red' ? 'Red' : 'White'}: ${moveNotation}`
+            };
+        });
+
         return {
             // Game state
             currentPlayer: this.currentPlayer,
             gameOver: this.gameOver,
             turnNumber: this.calculateTurnNumber(),
+            fullMoveNumber: this.fullMoveNumber,
             
             // Board representation
             board: boardMatrix,
@@ -730,8 +827,12 @@ class SimpleCheckers {
             } : null,
             
             // Game context
-            lastMove: this.lastMove || null,
+            lastMove: this.moveHistory.length > 0 ? this.moveHistory[this.moveHistory.length - 1] : null,
             gamePhase: this.determineGamePhase(),
+            
+            // Move history
+            moveHistory: formattedMoveHistory,
+            totalMoves: this.moveHistory.length,
             
             // Coordinate system explanation
             coordinateSystem: {
