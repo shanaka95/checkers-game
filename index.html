@@ -139,6 +139,27 @@
             background: linear-gradient(135deg, #1f2937, #111827);
             border: 1px solid #374151;
         }
+        .message.success {
+            color: #10b981;
+        }
+        .message.warning {
+            color: #f59e0b;
+        }
+        .message.error {
+            color: #ef4444;
+        }
+        .message.info {
+            color: #3b82f6;
+        }
+        
+        /* Toggle switch styles */
+        #auto-restart-games:checked + div .block {
+            background-color: #3b82f6;
+        }
+        #auto-restart-games:checked + div .dot {
+            transform: translateX(100%);
+            background-color: #ffffff;
+        }
     </style>
 </head>
 <body class="text-gray-100 flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 lg:p-8">
@@ -206,6 +227,22 @@
                 <button id="new-game" class="btn-primary w-full text-white py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center shadow-lg">
                     <span class="material-icons-outlined mr-2">refresh</span>New Game
                 </button>
+                
+                <!-- Auto-restart checkbox for AI vs AI games -->
+                <div id="auto-restart-container" class="w-full p-3 bg-gray-700 rounded-lg" style="display: none;">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="auto-restart-games" class="sr-only">
+                        <div class="relative">
+                            <div class="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                            <div class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition"></div>
+                        </div>
+                        <div class="ml-3">
+                            <span class="text-gray-300 font-medium">Auto-restart games</span>
+                            <p class="text-xs text-gray-400">Automatically start new AI vs AI games</p>
+                        </div>
+                    </label>
+                </div>
+                
                 <button id="get-llm-move" class="btn-secondary w-full text-gray-300 py-3 px-4 rounded-lg text-lg font-medium flex items-center justify-center" style="display: none;">
                     <span class="material-icons-outlined mr-2">psychology</span>Get LLM Move
                 </button>
@@ -229,6 +266,58 @@
                         <p id="current-mode-text" class="text-lg font-medium">Human vs Human</p>
                         <p id="ai-status" class="text-sm text-gray-400"></p>
                     </div>
+                </div>
+            </div>
+            
+            <!-- AI Configuration -->
+            <div id="ai-config" class="bg-gray-800 p-6 rounded-xl shadow-2xl card-glow" style="display: none;">
+                <h2 class="text-xl font-semibold mb-4 text-blue-400">AI Configuration</h2>
+                
+                <!-- Red Player AI Config -->
+                <div id="red-ai-config" class="mb-4" style="display: none;">
+                    <h3 class="text-lg font-medium mb-3 text-red-400">Red Player AI</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Provider</label>
+                            <select id="red-provider" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="anthropic">Anthropic (Claude)</option>
+                                <option value="huggingface">Hugging Face</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Model</label>
+                            <select id="red-model" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- White Player AI Config -->
+                <div id="white-ai-config" class="mb-4" style="display: none;">
+                    <h3 class="text-lg font-medium mb-3 text-gray-300">White Player AI</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Provider</label>
+                            <select id="white-provider" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="anthropic">Anthropic (Claude)</option>
+                                <option value="huggingface">Hugging Face</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Model</label>
+                            <select id="white-model" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-4 p-3 bg-gray-700 rounded-lg">
+                    <p class="text-xs text-gray-400">
+                        <span class="material-icons-outlined text-xs mr-1">info</span>
+                        AI settings are applied to new requests. Configure each AI player separately.
+                    </p>
                 </div>
             </div>
             

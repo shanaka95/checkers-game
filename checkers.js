@@ -13,6 +13,37 @@ class SimpleCheckers {
         this.humanPlayer = 'red'; // Which color the human plays (in human-vs-ai mode)
         this.autorunActive = false;
         this.aiThinking = false;
+        this.autoRestartGames = false; // Auto-restart AI vs AI games
+        
+        // AI Configuration
+        this.aiConfig = {
+            red: {
+                provider: 'anthropic',
+                model: 'claude-3-5-sonnet-20240620'
+            },
+            white: {
+                provider: 'anthropic', 
+                model: 'claude-3-5-sonnet-20240620'
+            }
+        };
+        
+        // Available providers and models
+        this.availableProviders = null;
+        
+        // Preferred models for auto-restart (one player always Anthropic)
+        this.preferredModels = {
+            anthropic: [
+                'claude-3-5-sonnet-20240620',
+                'claude-3-haiku-20240307',
+                'claude-3-opus-20240229'
+            ],
+            huggingface: [
+                'Qwen/Qwen2.5-72B-Instruct',
+                'Qwen/Qwen3-32B',
+                'Qwen/Qwen3-14B',
+                'Qwen/Qwen3-8B'
+            ]
+        };
         
         // Move history tracking
         this.moveHistory = [];
@@ -30,6 +61,55 @@ class SimpleCheckers {
     generateGameId() {
         // Generate a UUID-like string
         return 'game_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9) + '_' + Math.random().toString(36).substr(2, 9);
+    }
+    
+    /**
+     * Randomly configure AI players for auto-restart games
+     * One player is always Anthropic, the other can be Anthropic or HuggingFace
+     */
+    randomizeAIPlayers() {
+        // Randomly decide which player gets Anthropic (always one of them)
+        const anthropicPlayer = Math.random() < 0.5 ? 'red' : 'white';
+        const otherPlayer = anthropicPlayer === 'red' ? 'white' : 'red';
+        
+        // Configure Anthropic player
+        const anthropicModel = this.preferredModels.anthropic[
+            Math.floor(Math.random() * this.preferredModels.anthropic.length)
+        ];
+        this.aiConfig[anthropicPlayer] = {
+            provider: 'anthropic',
+            model: anthropicModel
+        };
+        
+        // Configure other player (can be Anthropic or HuggingFace)
+        const useHuggingFace = Math.random() < 0.5; // 50% chance for HuggingFace
+        
+        if (useHuggingFace) {
+            const hfModel = this.preferredModels.huggingface[
+                Math.floor(Math.random() * this.preferredModels.huggingface.length)
+            ];
+            this.aiConfig[otherPlayer] = {
+                provider: 'huggingface',
+                model: hfModel
+            };
+        } else {
+            // Use another Anthropic model
+            const anthropicModel2 = this.preferredModels.anthropic[
+                Math.floor(Math.random() * this.preferredModels.anthropic.length)
+            ];
+            this.aiConfig[otherPlayer] = {
+                provider: 'anthropic',
+                model: anthropicModel2
+            };
+        }
+        
+        console.log('Randomized AI config:', {
+            [anthropicPlayer]: this.aiConfig[anthropicPlayer],
+            [otherPlayer]: this.aiConfig[otherPlayer]
+        });
+        
+        // Update the UI to reflect the new configuration
+        this.updateAIConfigUI();
     }
     
     createBoard() {
@@ -57,8 +137,10 @@ class SimpleCheckers {
         return board;
     }
     
-    init() {
+    async init() {
         this.setupEvents();
+        // Load available providers from backend
+        await this.loadAvailableProviders();
         // Set initial message for mode selection
         this.showMessage('Select a game mode to start');
         // Don't render board initially - wait for mode selection
@@ -91,7 +173,7 @@ class SimpleCheckers {
     }
     
     setupEvents() {
-        document.getElementById('checkerboard').addEventListener('click', (e) => {
+        document.getElementById('checkerboard').addEventListener('click', async (e) => {
             if (this.gameOver || this.aiThinking) return;
             
             const square = e.target.closest('.checker-cell');
@@ -100,7 +182,7 @@ class SimpleCheckers {
             const row = parseInt(square.dataset.row);
             const col = parseInt(square.dataset.col);
             
-            this.handleClick(row, col);
+            await this.handleClick(row, col);
         });
         
         // Mode selection events
@@ -112,13 +194,25 @@ class SimpleCheckers {
         document.getElementById('new-game').addEventListener('click', () => this.newGame());
         document.getElementById('get-llm-move').addEventListener('click', () => this.getLLMMove());
         document.getElementById('toggle-autorun').addEventListener('click', () => this.toggleAutorun());
-        document.getElementById('offer-draw').addEventListener('click', () => this.offerDraw());
-        document.getElementById('resign').addEventListener('click', () => this.resign());
+        document.getElementById('offer-draw').addEventListener('click', async () => await this.offerDraw());
+        document.getElementById('resign').addEventListener('click', async () => await this.resign());
         document.getElementById('play-again').addEventListener('click', () => this.newGame());
         document.getElementById('close-modal').addEventListener('click', () => this.closeModal());
+        
+        // AI Configuration events
+        document.getElementById('red-provider').addEventListener('change', (e) => this.updateAIConfig('red', 'provider', e.target.value));
+        document.getElementById('red-model').addEventListener('change', (e) => this.updateAIConfig('red', 'model', e.target.value));
+        document.getElementById('white-provider').addEventListener('change', (e) => this.updateAIConfig('white', 'provider', e.target.value));
+        document.getElementById('white-model').addEventListener('change', (e) => this.updateAIConfig('white', 'model', e.target.value));
+        
+        // Auto-restart checkbox event
+        document.getElementById('auto-restart-games').addEventListener('change', (e) => {
+            this.autoRestartGames = e.target.checked;
+            console.log('Auto-restart games:', this.autoRestartGames ? 'enabled' : 'disabled');
+        });
     }
     
-    handleClick(row, col) {
+    async handleClick(row, col) {
         // In human-vs-ai mode, only allow human player to click
         if (this.gameMode === 'human-vs-ai' && this.currentPlayer !== this.humanPlayer) {
             return;
@@ -134,7 +228,7 @@ class SimpleCheckers {
         if (this.selectedPiece) {
             // Try to move
             if (this.isValidMove(row, col)) {
-                this.makeMove(this.selectedPiece.row, this.selectedPiece.col, row, col);
+                await this.makeMove(this.selectedPiece.row, this.selectedPiece.col, row, col);
                 this.clearSelection();
                 
                 // In human-vs-ai mode, trigger AI response after human move
@@ -236,7 +330,7 @@ class SimpleCheckers {
         return this.validMoves.some(move => move.row === row && move.col === col);
     }
     
-    makeMove(fromRow, fromCol, toRow, toCol) {
+    async makeMove(fromRow, fromCol, toRow, toCol) {
         const piece = this.board[fromRow][fromCol];
         let move = this.validMoves.find(m => m.row === toRow && m.col === toCol);
         
@@ -322,7 +416,7 @@ class SimpleCheckers {
         
         this.switchPlayer();
         this.renderBoard();
-        this.checkGameOver();
+        await this.checkGameOver();
     }
     
     switchPlayer() {
@@ -375,17 +469,17 @@ class SimpleCheckers {
     showMessage(text, type = 'info') {
         const messageEl = document.getElementById('message');
         messageEl.textContent = text;
-        messageEl.className = `message ${type}`;
+        messageEl.className = `text-center text-gray-300 mb-6 text-lg font-medium message ${type}`;
     }
     
-    checkGameOver() {
+    async checkGameOver() {
         if (this.redPieces === 0) {
-            this.endGame('White wins! All red pieces captured.');
+            await this.endGame('White wins! All red pieces captured.');
         } else if (this.whitePieces === 0) {
-            this.endGame('Red wins! All white pieces captured.');
+            await this.endGame('Red wins! All white pieces captured.');
         } else if (!this.hasValidMoves()) {
             const winner = this.currentPlayer === 'red' ? 'White' : 'Red';
-            this.endGame(`${winner} wins! ${this.currentPlayer} has no valid moves.`);
+            await this.endGame(`${winner} wins! ${this.currentPlayer} has no valid moves.`);
         }
     }
     
@@ -423,14 +517,174 @@ class SimpleCheckers {
         return false;
     }
     
-    endGame(message) {
+    async endGame(message) {
         this.gameOver = true;
         this.autorunActive = false;
         this.aiThinking = false;
         this.clearSelection();
         this.showMessage('Game Over', 'error');
         this.updateAIStatus('Game finished');
-        this.showModal(message);
+        
+        // Determine the winner from the message and update the database
+        await this.updateGameResults(message);
+        
+        // Check if auto-restart is enabled for AI vs AI games
+        if (this.autoRestartGames && this.gameMode === 'ai-vs-ai') {
+            console.log('Auto-restarting AI vs AI game with randomized players...');
+            this.showMessage('Game finished! Auto-restarting with new AI configuration...', 'info');
+            
+            // Wait a moment to show the message
+            setTimeout(() => {
+                this.autoRestartGame();
+            }, 2000);
+        } else {
+            // Show the normal game over modal
+            this.showModal(message);
+        }
+    }
+    
+    /**
+     * Auto-restart a new AI vs AI game with randomized players
+     */
+    autoRestartGame() {
+        // Randomize AI player configurations
+        this.randomizeAIPlayers();
+        
+        // Initialize a new game
+        this.board = this.createBoard();
+        this.currentPlayer = 'red';
+        this.selectedPiece = null;
+        this.validMoves = [];
+        this.gameOver = false;
+        this.redPieces = 12;
+        this.whitePieces = 12;
+        this.aiThinking = false;
+        
+        // Reset move history
+        this.moveHistory = [];
+        this.fullMoveNumber = 1;
+        
+        // Generate new game ID
+        this.gameId = this.generateGameId();
+        console.log('Auto-restarted game with ID:', this.gameId);
+        
+        // Update the board and UI
+        this.renderBoard();
+        this.updateStatus();
+        
+        // Start autorun immediately
+        this.startAutorun();
+    }
+
+    /**
+     * Log the game winner to the database
+     */
+    async updateGameResults(endGameMessage) {
+        try {
+            // Extract winner from the end game message
+            let winnerColor = null;
+            
+            if (endGameMessage.includes('Red wins') || endGameMessage.includes('red wins')) {
+                winnerColor = 'red';
+            } else if (endGameMessage.includes('White wins') || endGameMessage.includes('white wins')) {
+                winnerColor = 'white';
+            } else if (endGameMessage.includes('draw') || endGameMessage.includes('Draw')) {
+                // Handle draws - we'll skip database update for now since our schema expects a winner
+                console.log('Game ended in a draw - skipping database update');
+                return;
+            }
+            
+            if (!winnerColor) {
+                console.error('Could not determine winner from message:', endGameMessage);
+                return;
+            }
+            
+            // Determine if winner is human or AI based on game mode
+            let winnerType, winnerProvider, winnerModel;
+            
+            if (this.gameMode === 'human-vs-human') {
+                winnerType = 'human';
+                winnerProvider = null;
+                winnerModel = null;
+            } else if (this.gameMode === 'ai-vs-ai') {
+                // Both players are AI, get the winner's config
+                winnerType = 'ai';
+                winnerProvider = this.aiConfig[winnerColor].provider;
+                winnerModel = this.aiConfig[winnerColor].model;
+            } else if (this.gameMode === 'human-vs-ai') {
+                // Check if the winner is the human or AI player
+                if (winnerColor === this.humanPlayer) {
+                    winnerType = 'human';
+                    winnerProvider = null;
+                    winnerModel = null;
+                } else {
+                    winnerType = 'ai';
+                    const aiColor = this.humanPlayer === 'red' ? 'white' : 'red';
+                    winnerProvider = this.aiConfig[aiColor].provider;
+                    winnerModel = this.aiConfig[aiColor].model;
+                }
+            }
+            
+            console.log(`Game ${this.gameId} finished. Winner: ${winnerColor} (${winnerType})`);
+            if (winnerType === 'ai') {
+                console.log(`AI Winner: ${winnerProvider}/${winnerModel}`);
+            }
+            
+            // Prepare winner logging request
+            const winnerData = {
+                game_id: this.gameId,
+                winner_color: winnerColor,
+                winner_type: winnerType,
+                total_moves: this.moveHistory.length,
+                finish_reason: this.getFinishReason(endGameMessage)
+            };
+            
+            // Add AI-specific data if winner is AI
+            if (winnerType === 'ai') {
+                winnerData.provider = winnerProvider;
+                winnerData.model = winnerModel;
+            }
+            
+            // Call the log-winner endpoint
+            const response = await fetch('http://localhost:8000/log-winner', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(winnerData)
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('Game winner logged in database:', result);
+                this.showMessage(`Game winner logged successfully`, 'success');
+            } else {
+                const error = await response.text();
+                console.error('Failed to log game winner:', error);
+                this.showMessage('Failed to save game winner to database', 'warning');
+            }
+            
+        } catch (error) {
+            console.error('Error logging game winner:', error);
+            this.showMessage('Error saving game winner', 'warning');
+        }
+    }
+    
+    /**
+     * Determine the finish reason based on the end game message
+     */
+    getFinishReason(endGameMessage) {
+        if (endGameMessage.includes('resignation')) {
+            return 'resignation';
+        } else if (endGameMessage.includes('draw')) {
+            return 'draw';
+        } else if (endGameMessage.includes('no valid moves')) {
+            return 'no_moves';
+        } else if (endGameMessage.includes('captured all')) {
+            return 'capture_all';
+        } else {
+            return 'unknown';
+        }
     }
     
     showModal(message) {
@@ -480,6 +734,7 @@ class SimpleCheckers {
         const modeIcon = document.querySelector('#game-mode-info .material-icons-outlined');
         const getLLMBtn = document.getElementById('get-llm-move');
         const autorunBtn = document.getElementById('toggle-autorun');
+        const autoRestartContainer = document.getElementById('auto-restart-container');
         
         switch(this.gameMode) {
             case 'human-vs-ai':
@@ -489,6 +744,7 @@ class SimpleCheckers {
                 modeIcon.className = 'material-icons-outlined text-blue-400 text-3xl';
                 getLLMBtn.style.display = 'flex';
                 autorunBtn.style.display = 'none';
+                autoRestartContainer.style.display = 'none';
                 break;
             case 'ai-vs-ai':
                 modeText.textContent = 'AI vs AI (Autorun)';
@@ -496,6 +752,7 @@ class SimpleCheckers {
                 modeIcon.className = 'material-icons-outlined text-purple-400 text-3xl';
                 getLLMBtn.style.display = 'none';
                 autorunBtn.style.display = 'flex';
+                autoRestartContainer.style.display = 'block';
                 break;
             case 'human-vs-human':
                 modeText.textContent = 'Human vs Human';
@@ -503,8 +760,12 @@ class SimpleCheckers {
                 modeIcon.className = 'material-icons-outlined text-green-400 text-3xl';
                 getLLMBtn.style.display = 'flex';
                 autorunBtn.style.display = 'none';
+                autoRestartContainer.style.display = 'none';
                 break;
         }
+        
+        // Update AI configuration UI
+        this.updateAIConfigUI();
     }
     
     toggleAutorun() {
@@ -642,20 +903,20 @@ class SimpleCheckers {
         }
     }
     
-    offerDraw() {
+    async offerDraw() {
         if (this.gameOver) return;
         
         if (confirm(`${this.currentPlayer} offers a draw. Do you accept?`)) {
-            this.endGame('Game ended in a draw by agreement.');
+            await this.endGame('Game ended in a draw by agreement.');
         }
     }
     
-    resign() {
+    async resign() {
         if (this.gameOver) return;
         
             const winner = this.currentPlayer === 'red' ? 'White' : 'Red';
         if (confirm(`Are you sure you want to resign? ${winner} will win.`)) {
-            this.endGame(`${winner} wins by resignation!`);
+            await this.endGame(`${winner} wins by resignation!`);
         }
     }
     
@@ -953,6 +1214,203 @@ class SimpleCheckers {
     }
     
     /**
+     * Load available AI providers and models from backend
+     */
+    async loadAvailableProviders() {
+        try {
+            const response = await fetch('http://localhost:8000/providers');
+            const data = await response.json();
+            this.availableProviders = data;
+            this.updateProviderUI();
+        } catch (error) {
+            console.error('Error loading providers:', error);
+            // Use fallback configuration if backend is not available
+            this.availableProviders = {
+                available_providers: ['anthropic', 'huggingface'],
+                provider_details: {
+                    anthropic: { 
+                        default_model: 'claude-3-5-sonnet-20240620',
+                        description: 'Claude models from Anthropic'
+                    },
+                    huggingface: { 
+                        default_model: 'Qwen/Qwen2.5-72B-Instruct',
+                        description: 'Open source models via Hugging Face'
+                    }
+                }
+            };
+            this.updateProviderUI();
+        }
+    }
+
+    /**
+     * Update provider and model dropdowns in UI
+     */
+    updateProviderUI() {
+        if (!this.availableProviders) return;
+
+        const providers = this.availableProviders.available_providers || [];
+        const providerDetails = this.availableProviders.provider_details || {};
+
+        // Update provider dropdowns
+        ['red', 'white'].forEach(color => {
+            const providerSelect = document.getElementById(`${color}-provider`);
+            const modelSelect = document.getElementById(`${color}-model`);
+            
+            if (providerSelect && modelSelect) {
+                // Clear existing options
+                providerSelect.innerHTML = '';
+                
+                // Add provider options
+                providers.forEach(provider => {
+                    const option = document.createElement('option');
+                    option.value = provider;
+                    option.textContent = this.getProviderDisplayName(provider);
+                    providerSelect.appendChild(option);
+                });
+                
+                // Set default provider
+                providerSelect.value = this.aiConfig[color].provider;
+                
+                // Update models for current provider
+                this.updateModelOptions(color, this.aiConfig[color].provider);
+            }
+        });
+    }
+
+    /**
+     * Get display name for provider
+     */
+    getProviderDisplayName(provider) {
+        const displayNames = {
+            anthropic: 'Anthropic (Claude)',
+            huggingface: 'Hugging Face',
+            openai: 'OpenAI (GPT)'
+        };
+        return displayNames[provider] || provider;
+    }
+
+    /**
+     * Update model options based on selected provider
+     */
+    updateModelOptions(color, provider) {
+        const modelSelect = document.getElementById(`${color}-model`);
+        if (!modelSelect || !this.availableProviders) return;
+
+        // Clear existing options
+        modelSelect.innerHTML = '';
+
+        // Define available models for each provider
+        const availableModels = {
+            anthropic: [
+                { value: 'claude-3-5-sonnet-20240620', label: 'Claude 3.5 Sonnet' },
+                { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku (Fast)' },
+                { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus (Most Capable)' }
+            ],
+            huggingface: [
+                // Qwen Models
+                { value: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen 2.5 72B (Default)' },
+                { value: 'Qwen/Qwen3-235B-A22B', label: 'Qwen 3 235B' },
+                { value: 'Qwen/Qwen3-32B', label: 'Qwen 3 32B' },
+                { value: 'Qwen/Qwen3-30B-A3B', label: 'Qwen 3 30B' },
+                { value: 'Qwen/Qwen3-14B', label: 'Qwen 3 14B' },
+                { value: 'Qwen/Qwen3-8B', label: 'Qwen 3 8B' },
+                { value: 'Qwen/Qwen3-4B', label: 'Qwen 3 4B' },
+                // Mistral Models
+                { value: 'mistralai/Mistral-Small-3.1-24B-Instruct-2503', label: 'Mistral Small 3.1 24B' },
+                { value: 'mistralai/Mistral-Small-24B-Instruct-2501', label: 'Mistral Small 24B' },
+                { value: 'mistralai/Magistral-Small-2506', label: 'Magistral Small' },
+                { value: 'mistralai/Mixtral-8x7B-Instruct-v0.1', label: 'Mixtral 8x7B' },
+                // Other Models
+                { value: 'meta-llama/Llama-3.1-70B-Instruct', label: 'Llama 3.1 70B' },
+                { value: 'microsoft/DialoGPT-medium', label: 'DialoGPT Medium' }
+            ]
+        };
+
+        const models = availableModels[provider] || [
+            { value: this.availableProviders.provider_details[provider]?.default_model || 'default-model', 
+              label: 'Default Model' }
+        ];
+
+        // Add model options
+        models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            modelSelect.appendChild(option);
+        });
+
+        // Set current model or default
+        const currentModel = this.aiConfig[color].model;
+        const modelExists = models.some(m => m.value === currentModel);
+        modelSelect.value = modelExists ? currentModel : models[0].value;
+        
+        // Update config if model changed
+        if (!modelExists) {
+            this.aiConfig[color].model = models[0].value;
+        }
+    }
+
+    /**
+     * Update AI configuration
+     */
+    updateAIConfig(color, setting, value) {
+        this.aiConfig[color][setting] = value;
+        
+        // If provider changed, update model options
+        if (setting === 'provider') {
+            this.updateModelOptions(color, value);
+            // Set to default model for new provider
+            const defaultModel = this.availableProviders?.provider_details[value]?.default_model;
+            if (defaultModel) {
+                this.aiConfig[color].model = defaultModel;
+                document.getElementById(`${color}-model`).value = defaultModel;
+            }
+        }
+        
+        console.log(`Updated ${color} AI: ${setting} = ${value}`, this.aiConfig[color]);
+    }
+
+    /**
+     * Show/hide AI configuration UI based on game mode
+     */
+    updateAIConfigUI() {
+        const aiConfigPanel = document.getElementById('ai-config');
+        const redAIConfig = document.getElementById('red-ai-config');
+        const whiteAIConfig = document.getElementById('white-ai-config');
+        
+        if (!aiConfigPanel || !redAIConfig || !whiteAIConfig) return;
+
+        let showRedAI = false;
+        let showWhiteAI = false;
+
+        switch (this.gameMode) {
+            case 'human-vs-ai':
+                // Show AI config for non-human player
+                showRedAI = this.humanPlayer !== 'red';
+                showWhiteAI = this.humanPlayer !== 'white';
+                break;
+            case 'ai-vs-ai':
+                // Show both AI configs
+                showRedAI = true;
+                showWhiteAI = true;
+                break;
+            case 'human-vs-human':
+            case 'select':
+            default:
+                // Hide AI config
+                break;
+        }
+
+        // Show/hide the entire AI config panel
+        const showPanel = showRedAI || showWhiteAI;
+        aiConfigPanel.style.display = showPanel ? 'block' : 'none';
+        
+        // Show/hide individual player configs
+        redAIConfig.style.display = showRedAI ? 'block' : 'none';
+        whiteAIConfig.style.display = showWhiteAI ? 'block' : 'none';
+    }
+
+    /**
      * Send current board state to LLM for move suggestion using the new predict-move endpoint
      */
     async getLLMMove() {
@@ -968,6 +1426,9 @@ class SimpleCheckers {
             this.showMessage(`${playerName} is thinking...`, 'info');
             this.updateAIStatus(`${playerName} analyzing position...`);
             
+            // Get AI configuration for current player
+            const aiConfig = this.aiConfig[this.currentPlayer];
+            
             const response = await fetch('http://localhost:8000/predict-move', {
                 method: 'POST',
                 headers: {
@@ -975,7 +1436,9 @@ class SimpleCheckers {
                 },
                 body: JSON.stringify({
                     board_state: boardState,
-                    game_id: this.gameId
+                    game_id: this.gameId,
+                    provider: aiConfig.provider,
+                    model: aiConfig.model
                 })
             });
             
@@ -1002,12 +1465,12 @@ class SimpleCheckers {
                     this.updateAIStatus(`Executing move: ${result.suggested_move.from} → ${result.suggested_move.to}`);
                     
                     // Auto-execute the move
-                    setTimeout(() => {
+                    setTimeout(async () => {
                         // First select the piece to set up validMoves
                         this.selectPiece(fromPos.row, fromPos.col);
                         
                         // Then make the move
-                        this.makeMove(fromPos.row, fromPos.col, toPos.row, toPos.col);
+                        await this.makeMove(fromPos.row, fromPos.col, toPos.row, toPos.col);
                         
                         this.showMessage(
                             `${playerName} move executed: ${result.suggested_move.from} → ${result.suggested_move.to}`, 
@@ -1052,6 +1515,7 @@ class SimpleCheckers {
 
 // Start the game
 let game;
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     game = new SimpleCheckers();
+    // Note: init() is already called in constructor, but it's async now
 }); 

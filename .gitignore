@@ -34,4 +34,10 @@ node_modules/
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+checkers_game_data.db 

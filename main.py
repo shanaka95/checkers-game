@@ -1,10 +1,12 @@
 import os
 import json
+import sqlite3
+import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
-import anthropic
+from ai_providers import create_ai_provider, AIProviderFactory
 
 app = FastAPI(title="Checkers AI API", description="FastAPI backend for checkers move prediction")
 
@@ -17,13 +19,101 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Claude Sonnet 4 model
-model = "claude-3-sonnet-20240229"
+# Database setup
+DATABASE_PATH = "checkers_game_data.db"
 
-# Initialize the Anthropic client
-client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_S"),
-)
+def init_database():
+    """Initialize the SQLite database and create tables if they don't exist"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    # Game moves table with provider and model information
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_moves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL,
+            player TEXT NOT NULL,
+            move_number INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
+            user_prompt TEXT NOT NULL,
+            llm_analysis TEXT NOT NULL,
+            tool_name TEXT,
+            tool_parameters TEXT,
+            previous_moves TEXT,
+            board_state TEXT NOT NULL,
+            provider TEXT,
+            model TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Game winners table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_winners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id TEXT NOT NULL UNIQUE,
+            winner_color TEXT NOT NULL,
+            winner_type TEXT NOT NULL,  -- 'human' or 'ai'
+            provider TEXT,              -- NULL if human, provider name if AI
+            model TEXT,                 -- NULL if human, model name if AI
+            game_duration_seconds INTEGER,
+            total_moves INTEGER,
+            finish_reason TEXT,         -- 'capture_all', 'resignation', 'draw', etc.
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+def save_move_to_db(game_id: str, player: str, move_number: int, user_prompt: str, 
+                   llm_analysis: str, tool_name: str = None, tool_parameters: str = None, 
+                   previous_moves: str = "", board_state: str = "", provider: str = None, model: str = None):
+    """Save move data to the database"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    timestamp = datetime.datetime.now().isoformat()
+    
+    cursor.execute("""
+        INSERT INTO game_moves 
+        (game_id, player, move_number, timestamp, user_prompt, llm_analysis, 
+         tool_name, tool_parameters, previous_moves, board_state, provider, model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (game_id, player, move_number, timestamp, user_prompt, llm_analysis,
+          tool_name, tool_parameters, previous_moves, board_state, provider, model))
+    
+    conn.commit()
+    conn.close()
+
+def save_game_winner(game_id: str, winner_color: str, winner_type: str, provider: str = None, 
+                    model: str = None, game_duration_seconds: int = None, total_moves: int = None, 
+                    finish_reason: str = "unknown"):
+    """Save game winner information to the database"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO game_winners 
+            (game_id, winner_color, winner_type, provider, model, game_duration_seconds, total_moves, finish_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (game_id, winner_color, winner_type, provider, model, game_duration_seconds, total_moves, finish_reason))
+        
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        # Game already recorded
+        return False
+    finally:
+        conn.close()
+
+# Initialize database on startup
+init_database()
+
+# Default AI provider configuration (used as fallbacks)
+DEFAULT_PROVIDER = "anthropic"
+DEFAULT_MODEL = "claude-3-5-sonnet-20240620"
 
 # Define available tool
 def make_move(from_position: str, to_position: str, game_id: str = "unknown") -> str:
@@ -38,7 +128,7 @@ def make_move(from_position: str, to_position: str, game_id: str = "unknown") ->
     Returns:
         Confirmation message
     """
-    print(f"[Game {game_id}] MOVE TOOL CALLED: From {from_position} to {to_position}")
+
     return f"Move executed: {from_position} -> {to_position}"
 
 # Tool registry
@@ -85,27 +175,14 @@ def execute_tool_call(tool_name: str, arguments: Dict[str, Any], game_id: str = 
     except Exception as e:
         return f"Error executing tool: {str(e)}"
 
-def parse_tool_calls_from_response(response_content: List[Any]) -> List[Dict[str, Any]]:
-    """
-    Parse tool calls from Claude's response content blocks.
-    """
-    tool_calls = []
-    
-    for content_block in response_content:
-        if hasattr(content_block, 'type') and content_block.type == "tool_use":
-            tool_calls.append({
-                "tool": content_block.name,
-                "arguments": content_block.input,
-                "id": content_block.id
-            })
-    
-    return tool_calls
+# Note: Tool call parsing is now handled by the AI provider classes
 
 # Pydantic models for move prediction
 class PredictMoveRequest(BaseModel):
     board_state: Dict[str, Any]
     game_id: Optional[str] = None
-    model: Optional[str] = model
+    provider: str  # Required: frontend must specify provider
+    model: str     # Required: frontend must specify model
 
 class PredictMoveResponse(BaseModel):
     analysis: str
@@ -114,27 +191,63 @@ class PredictMoveResponse(BaseModel):
     tool_calls: List[Dict[str, Any]] = []
     tool_results: List[Dict[str, Any]] = []
 
+# Pydantic models for game winner logging
+class LogWinnerRequest(BaseModel):
+    game_id: str
+    winner_color: str  # "red" or "white"
+    winner_type: str   # "human" or "ai"
+    provider: Optional[str] = None      # Required if winner_type is "ai"
+    model: Optional[str] = None         # Required if winner_type is "ai"
+    game_duration_seconds: Optional[int] = None
+    total_moves: Optional[int] = None
+    finish_reason: Optional[str] = "unknown"  # e.g., "capture_all", "resignation", "draw"
+
+class LogWinnerResponse(BaseModel):
+    message: str
+    game_id: str
+    winner_info: Dict[str, Any]
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
-    return {"message": "Checkers AI API is running with Claude Sonnet 4", "available_endpoints": ["/predict-move"]}
+    available_providers = AIProviderFactory.get_available_providers()
+    return {
+        "message": "Checkers AI API is running with per-request provider selection", 
+        "available_endpoints": ["/predict-move", "/log-winner", "/providers"],
+        "available_providers": available_providers,
+        "note": "Each request must specify 'provider' and 'model' parameters"
+    }
 
 @app.post("/predict-move", response_model=PredictMoveResponse)
 async def predict_next_move(request: PredictMoveRequest):
     """
-    Analyze checkers board state and predict the best move using Claude Sonnet 4 with tool calling
+    Analyze checkers board state and predict the best move using AI provider with tool calling
     """
     try:
-        if not os.environ.get("ANTHROPIC_S"):
-            raise HTTPException(status_code=500, detail="ANTHROPIC_S environment variable is not set")
+        # Validate provider is available
+        available_providers = AIProviderFactory.get_available_providers()
+        if request.provider not in available_providers:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Provider '{request.provider}' not available. Available providers: {available_providers}"
+            )
+        
+        # Create AI provider based on request
+        current_provider = create_ai_provider(
+            provider_name=request.provider,
+            model=request.model
+        )
         
         # Log game ID for tracking
         game_id = request.game_id or "unknown"
-        print(f"[Game {game_id}] Processing move prediction request with Claude Sonnet 4")
+        print(f"[Game {game_id}] Processing move prediction request with {current_provider.get_provider_name()} provider (model: {request.model})")
         
         board_state = request.board_state
         current_player = board_state.get("currentPlayer", "unknown")
         available_moves = board_state.get("availableMoves", [])
+        # Use the actual move history length + 1 for the next move number
+        move_history = board_state.get("moveHistory", [])
+        move_number = len(move_history) + 1
         
         print(f"[Game {game_id}] Current player: {current_player}, Available moves: {len(available_moves)}")
         
@@ -313,37 +426,20 @@ Analyze this position and select your best move. Consider:
 
 Execute your chosen move using the move tool with exact notation (e.g., "C3" to "D4")."""
 
-        # Make the completion request using Anthropic's Messages API
+        # Make the AI prediction request
         try:
-            
-            response = client.messages.create(
-                model=request.model,
-                max_tokens=1024,
-                system=system_message,
-                tools=TOOL_DEFINITIONS,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": analysis_prompt
-                    }
-                ]
+            ai_response = current_provider.generate_move_prediction(
+                system_message=system_message,
+                user_prompt=analysis_prompt,
+                tools=TOOL_DEFINITIONS
             )
-            print(response)
+            
+            analysis_text = ai_response["text_content"]
+            tool_calls = ai_response["tool_calls"]
+            
         except Exception as e:
-            print(f"Claude API call failed: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to get response from Claude: {str(e)}")
-        
-        # Extract response content
-        response_content = response.content
-        
-        # Get text content from response
-        analysis_text = ""
-        for content_block in response_content:
-            if content_block.type == "text":
-                analysis_text += content_block.text
-        
-        # Parse tool calls from Claude's response
-        tool_calls = parse_tool_calls_from_response(response_content)
+            print(f"{current_provider.get_provider_name()} API call failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get response from {current_provider.get_provider_name()}: {str(e)}")
         
         tool_results = []
         suggested_move = {}
@@ -375,6 +471,31 @@ Execute your chosen move using the move tool with exact notation (e.g., "C3" to 
                     "id": tool_call.get("id")
                 })
         
+        # Save move data to database
+        try:
+            # Prepare data for database storage
+            previous_moves_json = json.dumps(board_state.get('moveHistory', []))
+            board_state_json = json.dumps(board_state)
+            tool_name = tool_calls[0]["tool"] if tool_calls else None
+            tool_parameters = json.dumps(tool_calls[0]["arguments"]) if tool_calls else None
+            
+            save_move_to_db(
+                game_id=game_id,
+                player=current_player,
+                move_number=move_number,
+                user_prompt=analysis_prompt,
+                llm_analysis=analysis_text,
+                tool_name=tool_name,
+                tool_parameters=tool_parameters,
+                previous_moves=previous_moves_json,
+                board_state=board_state_json,
+                provider=request.provider,
+                model=request.model
+            )
+            print(f"[Game {game_id}] Move data saved to database with {request.provider}/{request.model}")
+        except Exception as e:
+            print(f"[Game {game_id}] Failed to save to database: {e}")
+        
         return PredictMoveResponse(
             analysis=analysis_text,
             suggested_move=suggested_move,
@@ -385,6 +506,112 @@ Execute your chosen move using the move tool with exact notation (e.g., "C3" to 
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error predicting move: {str(e)}")
+
+@app.post("/log-winner", response_model=LogWinnerResponse)
+async def log_game_winner(request: LogWinnerRequest):
+    """
+    Log the winner of a completed game
+    """
+    try:
+        game_id = request.game_id
+        winner_color = request.winner_color.lower()
+        winner_type = request.winner_type.lower()
+        
+        # Validation
+        if winner_color not in ["red", "white"]:
+            raise HTTPException(status_code=400, detail="winner_color must be 'red' or 'white'")
+        
+        if winner_type not in ["human", "ai"]:
+            raise HTTPException(status_code=400, detail="winner_type must be 'human' or 'ai'")
+        
+        if winner_type == "ai" and (not request.provider or not request.model):
+            raise HTTPException(status_code=400, detail="provider and model are required when winner_type is 'ai'")
+        
+        # Check if game exists in moves table
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM game_moves WHERE game_id = ?", (game_id,))
+        total_records = cursor.fetchone()[0]
+        conn.close()
+        
+        if total_records == 0:
+            raise HTTPException(status_code=404, detail=f"No game records found for game_id: {game_id}")
+        
+        print(f"[Game {game_id}] Logging winner: {winner_color} ({winner_type})")
+        if winner_type == "ai":
+            print(f"[Game {game_id}] AI Winner details: {request.provider}/{request.model}")
+        
+        # Save winner information
+        success = save_game_winner(
+            game_id=game_id,
+            winner_color=winner_color,
+            winner_type=winner_type,
+            provider=request.provider if winner_type == "ai" else None,
+            model=request.model if winner_type == "ai" else None,
+            game_duration_seconds=request.game_duration_seconds,
+            total_moves=request.total_moves,
+            finish_reason=request.finish_reason
+        )
+        
+        if not success:
+            raise HTTPException(status_code=409, detail=f"Winner for game {game_id} has already been logged")
+        
+        winner_info = {
+            "color": winner_color,
+            "type": winner_type,
+            "provider": request.provider if winner_type == "ai" else None,
+            "model": request.model if winner_type == "ai" else None,
+            "game_duration_seconds": request.game_duration_seconds,
+            "total_moves": request.total_moves,
+            "finish_reason": request.finish_reason
+        }
+        
+        return LogWinnerResponse(
+            message=f"Game {game_id} winner logged successfully",
+            game_id=game_id,
+            winner_info=winner_info
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error logging winner: {str(e)}")
+
+# Note: Provider switching is now handled per-request, no global state needed
+
+@app.get("/providers")
+async def get_available_providers():
+    """
+    Get list of available AI providers and their default models
+    """
+    available_providers = AIProviderFactory.get_available_providers()
+    
+    # Default models for each provider
+    default_models = {
+        "anthropic": "claude-3-5-sonnet-20240620",
+        "huggingface": "Qwen/Qwen2.5-72B-Instruct"
+    }
+    
+    provider_info = {}
+    for provider in available_providers:
+        provider_info[provider] = {
+            "default_model": default_models.get(provider, "unknown"),
+            "description": _get_provider_description(provider)
+        }
+    
+    return {
+        "available_providers": available_providers,
+        "provider_details": provider_info,
+        "usage": "Include 'provider' and 'model' in your /predict-move requests"
+    }
+
+def _get_provider_description(provider: str) -> str:
+    """Get description for each provider"""
+    descriptions = {
+        "anthropic": "Claude models from Anthropic (excellent for reasoning and tool calling)",
+        "huggingface": "Open source models via Hugging Face (configurable, cost-effective)"
+    }
+    return descriptions.get(provider, "AI provider")
 
 if __name__ == "__main__":
     import uvicorn
